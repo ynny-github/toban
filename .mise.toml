@@ -1,0 +1,8 @@
+[tools]
+go = "1.25"
+lefthook = "latest"
+nono = "0.80.0"
+"github:ynny-github/agent-sandbox" = "latest"
+
+[settings]
+minimum_release_age_excludes = ["github:ynny-github/agent-sandbox"]

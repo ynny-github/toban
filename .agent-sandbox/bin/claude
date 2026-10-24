@@ -1,0 +1,31 @@
+#!/bin/sh
+# Launch Claude Code under nono, with commands routed through execd.
+# Edit freely. Start it with `agent-sandbox launch claude`, which shows any
+# change to .agent-sandbox/ and asks before running it.
+set -eu
+here=$(cd "$(dirname "$0")/.." && pwd)
+
+# Uncomment to run context-mode's code through execd.
+# export CONTEXT_MODE_EXEC_BACKEND=execd   # context-mode's execd backend
+
+agent-sandbox doctor --command-profile "$here/command-profile.json" \
+  --agent-profile "$here/claude-profile.json"
+
+sock=$(execd up --profile "$here/command-profile.json")
+trap 'execd down "$sock"' EXIT
+
+export AGENT_SANDBOX_EXECD_SOCKET="$sock"
+export CLAUDE_CODE_SHELL="$here/bash"
+export HERDR_AGENT=claude   # tells herdr the pane runs claude; drop if unused
+
+# The hook settings are passed inline: the approved copy they live in is not
+# readable inside the agent's sandbox.
+# In a git worktree, also grant the main repository's .git:
+#   --allow "$(git rev-parse --path-format=absolute --git-common-dir)"
+nono run --allow-cwd --no-diagnostics --profile "$here/claude-profile.json" \
+  --read-file "$(realpath "$(command -v agent-sandbox)")" \
+  --read-file "$(realpath "$(command -v execd)")" \
+  --read-file "$here/bash" \
+  --allow-unix-socket "$sock" \
+  -- claude --settings "$(cat "$here/settings.json")" \
+     --append-system-prompt "$(agent-sandbox ai pointer)" "$@"
