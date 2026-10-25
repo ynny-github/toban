@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"github.com/ynny-github/toban/internal/executor/orca"
+	"github.com/ynny-github/toban/internal/schedule"
 	"github.com/ynny-github/toban/internal/tick"
 	"github.com/ynny-github/toban/internal/tracker/github"
 	"github.com/ynny-github/toban/internal/workflow"
@@ -19,7 +21,8 @@ import (
 const usage = `usage: toban [-config <dir>] <command>
 
 commands:
-  tick    すべての Workflow を 1 回ずつ処理し、Candidate を Dispatch する
+  tick                すべての Workflow を 1 回ずつ処理し、Candidate を Dispatch する
+  schedule install    tick を config.yaml の間隔で起動するジョブを launchd に登録する（やり直すと置き換わる）
 `
 
 func main() {
@@ -32,6 +35,12 @@ func main() {
 	switch flag.Arg(0) {
 	case "tick":
 		err = runTick(context.Background(), log, *configDir)
+	case "schedule":
+		if flag.Arg(1) != "install" {
+			flag.Usage()
+			os.Exit(2)
+		}
+		err = installSchedule(log, *configDir)
 	default:
 		flag.Usage()
 		os.Exit(2)
@@ -102,4 +111,48 @@ func target(w *workflow.Workflow) (tick.Target, error) {
 		t.Executor = orca.New(*w.Executor.Orca, orca.Command("orca"))
 	}
 	return t, nil
+}
+
+func installSchedule(log *slog.Logger, configDir string) error {
+	settings, err := workflow.LoadSettings(filepath.Join(configDir, "config.yaml"))
+	if err != nil {
+		return err
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if self, err = filepath.EvalSymlinks(self); err != nil {
+		return err
+	}
+	configDir, err = filepath.Abs(configDir)
+	if err != nil {
+		return err
+	}
+	// launchd は PATH を引き継がないので、tick が使うコマンドの場所をここで決めておく
+	var tools []string
+	for _, name := range []string{"gh", "orca", "git"} {
+		p, err := exec.LookPath(name)
+		if err != nil {
+			return fmt.Errorf("%s is not on PATH: %w", name, err)
+		}
+		if p, err = filepath.Abs(p); err != nil {
+			return err
+		}
+		tools = append(tools, p)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	job := schedule.Job{
+		Toban: self, ConfigDir: configDir, Tools: tools, Interval: settings.Interval,
+		Log: filepath.Join(home, "Library", "Logs", "toban", "tick.log"),
+	}
+	plistPath := filepath.Join(home, "Library", "LaunchAgents", schedule.Label+".plist")
+	if err := schedule.Install(job, plistPath); err != nil {
+		return err
+	}
+	log.Info("installed", "plist", plistPath, "interval", settings.Interval, "log", job.Log)
+	return nil
 }
