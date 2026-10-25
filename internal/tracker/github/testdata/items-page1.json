@@ -1,0 +1,154 @@
+{
+  "data": {
+    "owner": {
+      "projectV2": {
+        "id": "PVT_kwHOAouHos4BopIL",
+        "field": {
+          "id": "PVTSSF_lAHOAouHos4BopILzhnIQbU",
+          "options": [
+            {
+              "id": "f75ad846",
+              "name": "Todo"
+            },
+            {
+              "id": "47fc9ee4",
+              "name": "In Progress"
+            },
+            {
+              "id": "98236657",
+              "name": "Done"
+            }
+          ]
+        },
+        "items": {
+          "pageInfo": {
+            "hasNextPage": true,
+            "endCursor": "CURSOR1"
+          },
+          "nodes": [
+            {
+              "id": "PVTI_lAHOAouHos4BopILzhDZQrU",
+              "state": {
+                "name": "In Progress"
+              },
+              "content": {
+                "number": 2,
+                "title": "GitHub Tracker を実装する",
+                "body": "## 何をするか",
+                "url": "https://github.com/ynny-github/toban/issues/2",
+                "state": "OPEN",
+                "repository": {
+                  "nameWithOwner": "ynny-github/toban"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "ready-for-agent"
+                    }
+                  ]
+                },
+                "assignees": {
+                  "nodes": [
+                    {
+                      "login": "ynny-github"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": "PVTI_lAHOAouHos4BopILzhDZQyc",
+              "state": {
+                "name": "Todo"
+              },
+              "content": {
+                "number": 3,
+                "title": "Workflow ファイルと設定を読み込む",
+                "body": "## 何をするか",
+                "url": "https://github.com/ynny-github/toban/issues/3",
+                "state": "OPEN",
+                "repository": {
+                  "nameWithOwner": "ynny-github/toban"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "ready-for-agent"
+                    }
+                  ]
+                },
+                "assignees": {
+                  "nodes": [
+                    {
+                      "login": "ynny-github"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": "PVTI_lAHOAouHos4BopILzhDZQ00",
+              "state": {
+                "name": "Todo"
+              },
+              "content": {
+                "number": 4,
+                "title": "toban tick を実装する",
+                "body": "## 何をするか",
+                "url": "https://github.com/ynny-github/toban/issues/4",
+                "state": "OPEN",
+                "repository": {
+                  "nameWithOwner": "ynny-github/toban"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "ready-for-agent"
+                    }
+                  ]
+                },
+                "assignees": {
+                  "nodes": [
+                    {
+                      "login": "ynny-github"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": "PVTI_lAHOAouHos4BopILzhDZQ9c",
+              "state": {
+                "name": "Todo"
+              },
+              "content": {
+                "number": 5,
+                "title": "toban schedule install を実装する",
+                "body": "## 何をするか",
+                "url": "https://github.com/ynny-github/toban/issues/5",
+                "state": "OPEN",
+                "repository": {
+                  "nameWithOwner": "ynny-github/toban"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "ready-for-agent"
+                    }
+                  ]
+                },
+                "assignees": {
+                  "nodes": [
+                    {
+                      "login": "ynny-github"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

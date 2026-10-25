@@ -1,0 +1,20 @@
+{
+  "data": {
+    "updateProjectV2ItemFieldValue": null
+  },
+  "errors": [
+    {
+      "type": "VALIDATION",
+      "path": [
+        "updateProjectV2ItemFieldValue"
+      ],
+      "locations": [
+        {
+          "line": 2,
+          "column": 3
+        }
+      ],
+      "message": "The single select option Id does not belong to the field"
+    }
+  ]
+}
