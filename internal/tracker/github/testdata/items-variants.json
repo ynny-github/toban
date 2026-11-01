@@ -1,0 +1,240 @@
+{
+  "data": {
+    "owner": {
+      "projectV2": {
+        "id": "PVT_kwHOAouHos4BopIL",
+        "field": {
+          "id": "PVTSSF_lAHOAouHos4BopILzhnIQbU",
+          "options": [
+            {
+              "id": "f75ad846",
+              "name": "Todo"
+            },
+            {
+              "id": "47fc9ee4",
+              "name": "In Progress"
+            },
+            {
+              "id": "98236657",
+              "name": "Done"
+            }
+          ]
+        },
+        "items": {
+          "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": "Y3Vyc29yOnYyOpK5MDAwMDAwMDAuMTQyODU3MTQyODU3MTQyOM4Q2UQt"
+          },
+          "nodes": [
+            {
+              "id": "PVTI_lAHOAouHos4BopILzhDZQrU",
+              "state": {
+                "name": "In Progress"
+              },
+              "content": {
+                "number": 2,
+                "title": "GitHub Tracker を実装する",
+                "body": "## 何をするか",
+                "url": "https://github.com/ynny-github/toban/issues/2",
+                "state": "OPEN",
+                "repository": {
+                  "nameWithOwner": "ynny-github/toban"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "ready-for-agent"
+                    }
+                  ]
+                },
+                "assignees": {
+                  "nodes": [
+                    {
+                      "login": "ynny-github"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": "PVTI_lAHOAouHos4BopILzhDZQyc",
+              "state": {
+                "name": "Todo"
+              },
+              "content": {
+                "number": 3,
+                "title": "Workflow ファイルと設定を読み込む",
+                "body": "## 何をするか",
+                "url": "https://github.com/ynny-github/toban/issues/3",
+                "state": "CLOSED",
+                "repository": {
+                  "nameWithOwner": "ynny-github/toban"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "ready-for-agent"
+                    }
+                  ]
+                },
+                "assignees": {
+                  "nodes": [
+                    {
+                      "login": "ynny-github"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": "PVTI_lAHOAouHos4BopILzhDZQ00",
+              "state": {
+                "name": "Todo"
+              },
+              "content": {
+                "number": 4,
+                "title": "toban tick を実装する",
+                "body": "## 何をするか",
+                "url": "https://github.com/ynny-github/toban/issues/4",
+                "state": "OPEN",
+                "repository": {
+                  "nameWithOwner": "ynny-github/toban"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "ready-for-agent"
+                    }
+                  ]
+                },
+                "assignees": {
+                  "nodes": []
+                }
+              }
+            },
+            {
+              "id": "PVTI_lAHOAouHos4BopILzhDZQ9c",
+              "state": {
+                "name": "Todo"
+              },
+              "content": {
+                "number": 5,
+                "title": "toban schedule install を実装する",
+                "body": "## 何をするか",
+                "url": "https://github.com/ynny-github/toban/issues/5",
+                "state": "OPEN",
+                "repository": {
+                  "nameWithOwner": "example/other"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "ready-for-agent"
+                    }
+                  ]
+                },
+                "assignees": {
+                  "nodes": [
+                    {
+                      "login": "ynny-github"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": "PVTI_lAHOAouHos4BopILzhDZQ_I",
+              "state": {
+                "name": "Todo"
+              },
+              "content": {
+                "number": 6,
+                "title": "本物の Issue を 1 件 toban で流す",
+                "body": "## 何をするか",
+                "url": "https://github.com/ynny-github/toban/issues/6",
+                "state": "OPEN",
+                "repository": {
+                  "nameWithOwner": "ynny-github/toban"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "ready-for-human"
+                    }
+                  ]
+                },
+                "assignees": {
+                  "nodes": [
+                    {
+                      "login": "ynny-github"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": "PVTI_lAHOAouHos4BopILzhDZRBM",
+              "state": {
+                "name": "Todo"
+              },
+              "content": {
+                "number": 7,
+                "title": "生きているエージェントのセッションにプロンプトを送る",
+                "body": "## 何をするか",
+                "url": "https://github.com/ynny-github/toban/issues/7",
+                "state": "OPEN",
+                "repository": {
+                  "nameWithOwner": "ynny-github/toban"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "needs-triage"
+                    }
+                  ]
+                },
+                "assignees": {
+                  "nodes": [
+                    {
+                      "login": "ynny-github"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": "PVTI_lAHOAouHos4BopILzhDZRC0",
+              "state": {
+                "name": "Todo"
+              },
+              "content": {
+                "number": 8,
+                "title": "Orca が Claude を bypass permissions で起動する件を決める",
+                "body": "## 何をするか",
+                "url": "https://github.com/ynny-github/toban/issues/8",
+                "state": "OPEN",
+                "repository": {
+                  "nameWithOwner": "ynny-github/toban"
+                },
+                "labels": {
+                  "nodes": [
+                    {
+                      "name": "ready-for-human"
+                    }
+                  ]
+                },
+                "assignees": {
+                  "nodes": [
+                    {
+                      "login": "ynny-github"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "id": "97b9715d-ad58-4134-9e71-f0752cd14121",
+  "ok": true,
+  "result": {
+    "outcome": {
+      "kind": "structured",
+      "sessionId": "claude_05800df8_38b1_4ebf_9909_b76daded3b62",
+      "handle": "structured-agent-session-claude_05800df8_38b1_4ebf_9909_b76daded3b62",
+      "tabId": "structured-agent-session-claude_05800df8_38b1_4ebf_9909_b76daded3b62"
+    },
+    "worktreeId": "92e1341e-1760-4817-b21e-a7eb78efa81f::/home/dev/orca/workspaces/toban/toban-orca-probe",
+    "receipt": {
+      "mode": "structured",
+      "preferred": "structured",
+      "reason": "requested",
+      "detail": "Started a structured chat session, as requested."
+    },
+    "prompt": {
+      "delivery": "submit",
+      "outcome": "journaled",
+      "messageId": "1792853125237-d5734900fee0442c95937c58c193170a"
+    },
+    "operationId": "1792853125037-4efff24a4d42495ebbb2fa735786e36e"
+  },
+  "_meta": {
+    "runtimeId": "eed44053-a88b-4960-acd0-cced8c2f8976"
+  }
+}

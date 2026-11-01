@@ -1,0 +1,25 @@
+{
+  "id": "df511f11-142d-43b1-843b-1142f873666b",
+  "ok": false,
+  "error": {
+    "code": "terminal_handle_stale",
+    "message": "terminal_handle_stale Terminal prompt request ID: f911ac28-b",
+    "data": {
+      "orchestrationRequestId": "f911ac28-b325-43f2-92f0-f897c55af24c",
+      "originalCommand": [
+        "orca",
+        "terminal",
+        "send",
+        "--terminal",
+        "structured-agent-session-claude_05800df8_38b1_4ebf_9909_b76daded3b62",
+        "--text",
+        "Second chat probe. Reply ok2.",
+        "--enter",
+        "--json"
+      ]
+    }
+  },
+  "_meta": {
+    "runtimeId": "eed44053-a88b-4960-acd0-cced8c2f8976"
+  }
+}

@@ -1,0 +1,97 @@
+{
+  "id": "ca3030a4-3aaa-4380-a448-778e3624a930",
+  "ok": true,
+  "result": {
+    "worktree": {
+      "id": "92e1341e-1760-4817-b21e-a7eb78efa81f::/home/dev/orca/workspaces/toban/gh-1",
+      "identity": {
+        "key": "wt2:local:238cda70-ec30-4bb4-bdb3-097fb4c009c3",
+        "executionHostId": "local",
+        "instanceId": "238cda70-ec30-4bb4-bdb3-097fb4c009c3"
+      },
+      "instanceId": "238cda70-ec30-4bb4-bdb3-097fb4c009c3",
+      "repoId": "92e1341e-1760-4817-b21e-a7eb78efa81f",
+      "projectId": "github:ynny-github/toban",
+      "hostId": "local",
+      "projectHostSetupId": "92e1341e-1760-4817-b21e-a7eb78efa81f",
+      "creatorProvenance": {
+        "kind": "host"
+      },
+      "path": "/home/dev/orca/workspaces/toban/gh-1",
+      "head": "9da995f7f06fef59daee6ba885692431b2f730ca",
+      "branch": "refs/heads/ynny-github/gh-1",
+      "isBare": false,
+      "isMainWorktree": false,
+      "displayName": "gh-1",
+      "displayNameMode": "fixed",
+      "comment": "",
+      "linkedIssue": 1,
+      "linkedPR": null,
+      "linkedLinearIssue": null,
+      "linkedLinearIssueWorkspaceId": null,
+      "linkedLinearIssueOrganizationUrlKey": null,
+      "linkedGitLabMR": null,
+      "linkedGitLabIssue": null,
+      "linkedBitbucketPR": null,
+      "linkedAzureDevOpsPR": null,
+      "linkedGiteaPR": null,
+      "linkedWorkItem": null,
+      "linkedItems": [
+        {
+          "provider": "github",
+          "type": "issue",
+          "number": 1
+        }
+      ],
+      "linkedTaskSourceContext": null,
+      "isArchived": false,
+      "isUnread": false,
+      "isPinned": false,
+      "sortOrder": 1792903296062,
+      "lastActivityAt": 1792903297031,
+      "createdAt": 1792903297031,
+      "createdWithAgent": "claude",
+      "cliProvenance": {
+        "kind": "created-by-cli",
+        "createdAt": 1792903290791,
+        "startupAgent": "claude"
+      },
+      "baseRef": "refs/remotes/origin/main",
+      "workspaceStatus": "in-progress",
+      "parentWorktreeId": null,
+      "childWorktreeIds": [],
+      "lineage": null,
+      "git": {
+        "path": "/home/dev/orca/workspaces/toban/gh-1",
+        "head": "9da995f7f06fef59daee6ba885692431b2f730ca",
+        "branch": "refs/heads/ynny-github/gh-1",
+        "isBare": false,
+        "isMainWorktree": false
+      }
+    },
+    "lineage": null,
+    "workspaceLineage": null,
+    "launch": {
+      "outcome": {
+        "kind": "terminal",
+        "handle": "term_9e8b24d4-2168-49a3-adbb-a49e5943b5a4",
+        "paneKey": "a268962d-b9aa-4bda-bcd8-1acf7bc79f98:aceea889-4d44-431c-a1a4-6b2ce8c80035"
+      },
+      "worktreeId": "92e1341e-1760-4817-b21e-a7eb78efa81f::/home/dev/orca/workspaces/toban/gh-1",
+      "receipt": {
+        "mode": "terminal",
+        "preferred": "terminal",
+        "reason": "requested",
+        "detail": "Started a terminal agent, as requested."
+      },
+      "prompt": {
+        "delivery": "submit",
+        "outcome": "handed-to-terminal"
+      },
+      "operationId": "1792903290781-3ad844d6b83c4b19a14410b020447934"
+    }
+  },
+  "_meta": {
+    "runtimeId": "eed44053-a88b-4960-acd0-cced8c2f8976"
+  }
+}

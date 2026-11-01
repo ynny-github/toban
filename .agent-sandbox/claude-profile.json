@@ -16,7 +16,13 @@
   // socket mediation off by default, so /var/run/docker.sock is reachable
   // without a grant. ~/.docker is only for registry credentials, and is not
   // what makes docker work.
-  "filesystem": { "allow": ["/tmp"] },
+  //
+  // ~/.orca/agent-hooks: Orca's status hooks in ~/.claude/settings.json run
+  // claude-hook.sh from here; unreadable, the hook silently does nothing.
+  "filesystem": {
+    "allow": ["/tmp"],
+    "read": ["~/.orca/agent-hooks"]
+  },
 
   // Network is deliberately NOT blocked here: Claude cannot reach its API
   // without it. The command side is what is confined.
@@ -32,7 +38,17 @@
       // Claude falls back to the login shell, which sources ~/.bashrc, which
       // no profile grants -- every tool result is then prefixed with a
       // permission error. Costs noise, not access.
-      "CLAUDE_CODE_SHELL"
+      "CLAUDE_CODE_SHELL",
+
+      // Orca's status hooks POST these to Orca so its tab shows whether the
+      // agent is working or waiting. Stripped, the hook exits without
+      // posting. ORCA_AGENT_HOOK_TOKEN lets the agent post any status to
+      // Orca's hook listener; it reaches nothing else.
+      "ORCA_PANE_KEY", "ORCA_TAB_ID", "ORCA_WORKTREE_ID",
+      "ORCA_AGENT_LAUNCH_TOKEN", "ORCA_AGENT_HOOK_PORT",
+      "ORCA_AGENT_HOOK_TOKEN", "ORCA_AGENT_HOOK_ENV",
+      "ORCA_AGENT_HOOK_VERSION", "ORCA_AGENT_HOOK_TRANSPORT",
+      "ORCA_AGENT_HOOK_ENDPOINT"
 
       // Add "CONTEXT_MODE_EXEC_BACKEND" here to use `claude --context-mode`.
     ]

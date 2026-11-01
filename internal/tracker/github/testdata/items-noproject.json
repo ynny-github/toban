@@ -1,0 +1,23 @@
+{
+  "data": {
+    "owner": {
+      "projectV2": null
+    }
+  },
+  "errors": [
+    {
+      "type": "NOT_FOUND",
+      "path": [
+        "owner",
+        "projectV2"
+      ],
+      "locations": [
+        {
+          "line": 3,
+          "column": 5
+        }
+      ],
+      "message": "Could not resolve to a ProjectV2 with the number 999."
+    }
+  ]
+}
