@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ynny-github/toban/internal/executor/orca"
+	"github.com/ynny-github/toban/internal/scaffold"
 	"github.com/ynny-github/toban/internal/schedule"
 	"github.com/ynny-github/toban/internal/tick"
 	"github.com/ynny-github/toban/internal/tracker/github"
@@ -24,6 +25,7 @@ const usage = `usage: toban [-config <dir>] <command>
 設定のディレクトリ（config.yaml と workflows/ を置く）は必須。-config か環境変数 TOBAN_CONFIG で指定する。
 
 commands:
+  init <dir>          <dir>（必須）に雛形（config.yaml と workflows/example.md.sample）を作る
   tick                すべての Workflow を 1 回ずつ処理し、Candidate を Dispatch する
   schedule install    tick を config.yaml の間隔で起動するジョブを launchd に登録する（やり直すと置き換わる）
 `
@@ -33,6 +35,14 @@ func main() {
 	flag.Usage = func() { fmt.Fprint(os.Stderr, usage); flag.PrintDefaults() }
 	configDir := flag.String("config", os.Getenv("TOBAN_CONFIG"), "設定のディレクトリ（既定は環境変数 TOBAN_CONFIG）")
 	flag.Parse()
+	// init のディレクトリは引数で必ず指定する。ほかのコマンドは -config か TOBAN_CONFIG
+	if flag.Arg(0) == "init" {
+		if flag.NArg() != 2 {
+			flag.Usage()
+			os.Exit(2)
+		}
+		*configDir = flag.Arg(1)
+	}
 	if *configDir == "" {
 		flag.Usage()
 		os.Exit(2)
@@ -42,6 +52,10 @@ func main() {
 	switch flag.Arg(0) {
 	case "tick":
 		err = runTick(context.Background(), log, *configDir)
+	case "init":
+		if err = scaffold.Init(*configDir); err == nil {
+			log.Info("created", "dir", *configDir, "next", "edit workflows/example.md.sample, rename it to .md, then run `toban schedule install`")
+		}
 	case "schedule":
 		if flag.Arg(1) != "install" {
 			flag.Usage()

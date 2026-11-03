@@ -1,0 +1,9 @@
+# toban の設定。どのキーも省略でき、省略すると下の既定値になる。
+# interval を変えたら `toban schedule install` をやり直す。
+
+# tick の間隔
+# interval: 5m
+
+# この利用率（%）以上なら、新しい Dispatch を見送る（Orca が返す Claude の利用枠）
+# max_session_percent: 80   # 5 時間枠
+# max_weekly_percent: 90    # 週次枠

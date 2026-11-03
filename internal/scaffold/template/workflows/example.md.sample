@@ -1,0 +1,20 @@
+---
+tracker:
+  kind: github
+  github:
+    project: https://github.com/users/OWNER/projects/1  # State を管理する GitHub Project の URL
+    label: ready-for-agent   # この Label を持つ Issue だけを Candidate にする
+    assignee: OWNER          # この assignee を持つ Issue だけを Candidate にする
+    # state_field: Status    # State を表す single select のフィールド名
+    # ready: Todo            # Dispatch を待つ State
+    # working: In Progress   # Dispatch したときに移す State
+    # repos: [OWNER/repo]    # 空ならすべてのリポジトリ
+executor:
+  kind: orca
+  # orca:
+  #   agent: claude
+max_concurrent: 1            # Working State の Issue がこの数に達するまで Dispatch する
+---
+{{.Issue.Repo}}#{{.Issue.Number}} 「{{.Issue.Title}}」に取り組む。
+
+{{.Issue.Body}}
