@@ -151,11 +151,14 @@ func LoadDir(dir string) ([]*Workflow, error) {
 // Settings はユーザー単位の設定（~/.config/toban/config.yaml）。
 type Settings struct {
 	Interval time.Duration // tick の間隔
+	// この利用率（%）以上なら、新しい Dispatch を見送る
+	MaxSessionPercent float64
+	MaxWeeklyPercent  float64
 }
 
 // LoadSettings は設定を読む。ファイルがなければ既定値を返す。
 func LoadSettings(path string) (Settings, error) {
-	s := Settings{Interval: 5 * time.Minute}
+	s := Settings{Interval: 5 * time.Minute, MaxSessionPercent: 80, MaxWeeklyPercent: 90}
 	src, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return s, nil
@@ -164,7 +167,9 @@ func LoadSettings(path string) (Settings, error) {
 		return s, err
 	}
 	var raw struct {
-		Interval string `yaml:"interval"`
+		Interval          string   `yaml:"interval"`
+		MaxSessionPercent *float64 `yaml:"max_session_percent"`
+		MaxWeeklyPercent  *float64 `yaml:"max_weekly_percent"`
 	}
 	dec := yaml.NewDecoder(bytes.NewReader(src))
 	dec.KnownFields(true)
@@ -175,6 +180,21 @@ func LoadSettings(path string) (Settings, error) {
 		if s.Interval, err = time.ParseDuration(raw.Interval); err != nil {
 			return s, fmt.Errorf("%s: interval: %w", path, err)
 		}
+	}
+	for key, p := range map[string]struct {
+		in  *float64
+		out *float64
+	}{
+		"max_session_percent": {raw.MaxSessionPercent, &s.MaxSessionPercent},
+		"max_weekly_percent":  {raw.MaxWeeklyPercent, &s.MaxWeeklyPercent},
+	} {
+		if p.in == nil {
+			continue
+		}
+		if *p.in <= 0 || *p.in > 100 {
+			return s, fmt.Errorf("%s: %s: must be in (0, 100], got %v", path, key, *p.in)
+		}
+		*p.out = *p.in
 	}
 	if s.Interval <= 0 {
 		return s, fmt.Errorf("%s: interval: must be positive, got %v", path, s.Interval)

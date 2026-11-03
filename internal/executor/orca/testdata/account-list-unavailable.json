@@ -1,0 +1,16 @@
+{
+  "id": "x",
+  "ok": true,
+  "result": {
+    "rateLimits": {
+      "claude": {
+        "provider": "claude",
+        "session": null,
+        "weekly": null,
+        "updatedAt": 1793715249408,
+        "error": "not signed in",
+        "status": "unavailable"
+      }
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "id": "x",
+  "ok": true,
+  "result": {
+    "rateLimits": {
+      "claude": {
+        "provider": "claude",
+        "session": {"usedPercent": 2, "windowMinutes": 300, "resetsAt": 1793729400310},
+        "weekly": {"usedPercent": 6, "windowMinutes": 10080, "resetsAt": 1794016800310},
+        "fableWeekly": {"usedPercent": 0, "windowMinutes": 10080, "resetsAt": 1794016800000},
+        "updatedAt": 1793715249408,
+        "error": null,
+        "status": "ok"
+      }
+    }
+  }
+}

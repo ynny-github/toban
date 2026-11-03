@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 
 	"github.com/ynny-github/toban/internal/executor/orca"
 	"github.com/ynny-github/toban/internal/schedule"
@@ -73,6 +74,20 @@ func runTick(ctx context.Context, log *slog.Logger, configDir string) error {
 		return nil
 	}
 	defer release()
+
+	settings, err := workflow.LoadSettings(filepath.Join(configDir, "config.yaml"))
+	if err != nil {
+		return err
+	}
+	// 確認できないときも見送る。見送っても Candidate は Ready のまま残り、次の tick でやり直す
+	limits, err := orca.New(orca.Config{}, orca.Command("orca")).RateLimits(ctx)
+	if err != nil {
+		return fmt.Errorf("cannot check Claude usage; not dispatching: %w", err)
+	}
+	if why := limits.Over(settings.MaxSessionPercent, settings.MaxWeeklyPercent, 15*time.Minute, time.Now()); why != "" {
+		log.Info("Claude usage is over the limit; not dispatching", "reason", why)
+		return nil
+	}
 
 	// 読めない Workflow があっても、読めたものは処理する
 	workflows, loadErr := workflow.LoadDir(filepath.Join(configDir, "workflows"))

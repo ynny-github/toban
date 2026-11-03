@@ -118,6 +118,20 @@ func TestLoadSettings(t *testing.T) {
 	if s.Interval != 5*time.Minute {
 		t.Errorf("default interval = %v, want 5m", s.Interval)
 	}
+	if s.MaxSessionPercent != 80 || s.MaxWeeklyPercent != 90 {
+		t.Errorf("default limits = %v/%v, want 80/90", s.MaxSessionPercent, s.MaxWeeklyPercent)
+	}
+
+	s, err = LoadSettings(writeWorkflow(t, "max_weekly_percent: 70\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.MaxSessionPercent != 80 || s.MaxWeeklyPercent != 70 {
+		t.Errorf("limits = %v/%v, want 80/70", s.MaxSessionPercent, s.MaxWeeklyPercent)
+	}
+	if _, err := LoadSettings(writeWorkflow(t, "max_session_percent: 101\n")); err == nil {
+		t.Error("LoadSettings accepted 101%")
+	}
 
 	if _, err := LoadSettings(writeWorkflow(t, "interval: 0s\n")); err == nil {
 		t.Error("LoadSettings accepted a zero interval")
