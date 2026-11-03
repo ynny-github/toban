@@ -1,0 +1,13 @@
+version: 2
+builds:
+  - main: ./cmd/toban
+    binary: toban
+    env: [CGO_ENABLED=0]
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+archives:
+  # mise の github バックエンドが OS と arch を見分けられるよう、小文字の os / arch を名前に入れる
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+checksum:
+  name_template: checksums.txt
