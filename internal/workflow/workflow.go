@@ -148,7 +148,7 @@ func LoadDir(dir string) ([]*Workflow, error) {
 	return ws, errors.Join(errs...)
 }
 
-// Settings はユーザー単位の設定（~/.config/toban/config.yaml）。
+// Settings はユーザー単位の設定（設定のディレクトリの config.yaml）。
 type Settings struct {
 	Interval time.Duration // tick の間隔
 	// この利用率（%）以上なら、新しい Dispatch を見送る

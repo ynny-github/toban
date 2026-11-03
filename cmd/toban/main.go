@@ -21,6 +21,8 @@ import (
 
 const usage = `usage: toban [-config <dir>] <command>
 
+設定のディレクトリ（config.yaml と workflows/ を置く）は必須。-config か環境変数 TOBAN_CONFIG で指定する。
+
 commands:
   tick                すべての Workflow を 1 回ずつ処理し、Candidate を Dispatch する
   schedule install    tick を config.yaml の間隔で起動するジョブを launchd に登録する（やり直すと置き換わる）
@@ -29,8 +31,12 @@ commands:
 func main() {
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	flag.Usage = func() { fmt.Fprint(os.Stderr, usage); flag.PrintDefaults() }
-	configDir := flag.String("config", defaultConfigDir(), "設定のディレクトリ")
+	configDir := flag.String("config", os.Getenv("TOBAN_CONFIG"), "設定のディレクトリ（既定は環境変数 TOBAN_CONFIG）")
 	flag.Parse()
+	if *configDir == "" {
+		flag.Usage()
+		os.Exit(2)
+	}
 
 	var err error
 	switch flag.Arg(0) {
@@ -50,14 +56,6 @@ func main() {
 		log.Error("failed", "error", err)
 		os.Exit(1)
 	}
-}
-
-func defaultConfigDir() string {
-	if d := os.Getenv("XDG_CONFIG_HOME"); d != "" {
-		return filepath.Join(d, "toban")
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "toban")
 }
 
 func runTick(ctx context.Context, log *slog.Logger, configDir string) error {
