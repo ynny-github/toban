@@ -45,7 +45,7 @@ Dispatch してよい条件をすべて満たす Issue。Workflow の Project �
 _Avoid_: 対象 Issue、eligible
 
 **Dispatch**:
-Candidate の State を Working State に移し、その Issue のための worker を 1 回起動すること。起動したあとの worker には関わらない。
+Candidate の State を Working State に移し、その Issue のための worker を 1 回起動する、またはその Issue の生きたセッションに続きの指示を 1 回送ること。渡したあとの worker には関わらない。
 _Avoid_: Attempt、Run、起動、割り当て
 
 **Workflow**:
