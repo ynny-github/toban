@@ -45,12 +45,12 @@ func TestExampleWorkflowRendersFirstAndContinuationPrompts(t *testing.T) {
 	}
 	config := filepath.Join(dir, "config.yaml")
 	src, _ := os.ReadFile(config)
-	head, example, ok := strings.Cut(string(src), "# workflows:\n")
+	head, example, ok := strings.Cut(string(src), "# trackers:\n")
 	if !ok {
 		t.Fatal("no commented example in the template")
 	}
 	var b strings.Builder
-	b.WriteString(head + "workflows:\n")
+	b.WriteString(head + "trackers:\n")
 	for _, line := range strings.Split(example, "\n") {
 		b.WriteString(strings.TrimPrefix(strings.TrimPrefix(line, "#"), " ") + "\n")
 	}

@@ -34,7 +34,7 @@ func versionString() string {
 
 const usage = `usage: toban [-config <dir>] <command>
 
-設定のディレクトリ（config.yaml を置く。Workflow も config.yaml に書く）は必須。-config か環境変数 TOBAN_CONFIG で指定する。
+設定のディレクトリ（config.yaml を置く。Tracker ごとの Workflow も config.yaml の trackers に書く）は必須。-config か環境変数 TOBAN_CONFIG で指定する。
 
 commands:
   init <dir>          <dir>（必須）に雛形（config.yaml）を作る
@@ -72,7 +72,7 @@ func main() {
 		err = runTick(context.Background(), log, *configDir)
 	case "init":
 		if err = scaffold.Init(*configDir); err == nil {
-			log.Info("created", "dir", *configDir, "next", "uncomment the workflows example in config.yaml and edit it, then run `toban schedule install`")
+			log.Info("created", "dir", *configDir, "next", "uncomment the trackers example in config.yaml and edit it, then run `toban schedule install`")
 		}
 	case "schedule":
 		if flag.Arg(1) != "install" {
@@ -120,7 +120,7 @@ func runTick(ctx context.Context, log *slog.Logger, configDir string) error {
 	}
 
 	if _, err := os.Stat(filepath.Join(configDir, "workflows")); err == nil {
-		log.Warn("workflows/ is no longer read; move each Workflow into the workflows list in config.yaml")
+		log.Warn("workflows/ is no longer read; move each Workflow into the trackers list in config.yaml")
 	}
 	// Workflow に誤りがあれば、どの Project も処理しない（誤った設定のまま一部だけ動かさない）
 	workflows, err := workflow.LoadWorkflows(filepath.Join(configDir, "config.yaml"))

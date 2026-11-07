@@ -41,19 +41,20 @@ type ExecutorConfig struct {
 
 // file は config.yaml の全体。知らないキーはエラーにする。
 type file struct {
-	Interval          string     `yaml:"interval"`
-	MaxSessionPercent *float64   `yaml:"max_session_percent"`
-	MaxWeeklyPercent  *float64   `yaml:"max_weekly_percent"`
-	Workflows         []workflow `yaml:"workflows"`
+	Interval          string         `yaml:"interval"`
+	MaxSessionPercent *float64       `yaml:"max_session_percent"`
+	MaxWeeklyPercent  *float64       `yaml:"max_weekly_percent"`
+	Executor          ExecutorConfig `yaml:"executor"`
+	Trackers          []trackerEntry `yaml:"trackers"`
 }
 
-type workflow struct {
-	Name               string         `yaml:"name"`
-	Tracker            TrackerConfig  `yaml:"tracker"`
-	Executor           ExecutorConfig `yaml:"executor"`
-	MaxConcurrent      *int           `yaml:"max_concurrent"`
-	Prompt             string         `yaml:"prompt"`
-	ContinuationPrompt string         `yaml:"continuation_prompt"`
+// trackerEntry は Tracker の管理単位（GitHub なら Project）1 つ分。
+type trackerEntry struct {
+	Name               string `yaml:"name"`
+	TrackerConfig      `yaml:",inline"`
+	MaxConcurrent      *int   `yaml:"max_concurrent"`
+	Prompt             string `yaml:"prompt"`
+	ContinuationPrompt string `yaml:"continuation_prompt"`
 }
 
 // read は config.yaml を読む。ファイルがなければ空として扱う。
@@ -74,21 +75,25 @@ func read(path string) (file, error) {
 	return f, nil
 }
 
-// LoadWorkflows は config.yaml の workflows を読む。1 つでも誤りがあれば、どれも返さずエラーにする。
+// LoadWorkflows は config.yaml の trackers を読み、root の executor と組み合わせて Workflow にする。1 つでも誤りがあれば、どれも返さずエラーにする。
 func LoadWorkflows(path string) ([]*Workflow, error) {
 	f, err := read(path)
 	if err != nil {
 		return nil, err
 	}
+	exec, err := buildExecutor(f.Executor)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
 	var ws []*Workflow
 	seen := map[string]bool{}
-	for i, raw := range f.Workflows {
-		w, err := build(raw)
+	for i, raw := range f.Trackers {
+		w, err := build(raw, exec)
 		if err == nil && seen[w.Name] {
 			err = fmt.Errorf("name: %q is used twice", w.Name)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("%s: workflows[%d]: %w", path, i, err)
+			return nil, fmt.Errorf("%s: trackers[%d]: %w", path, i, err)
 		}
 		seen[w.Name] = true
 		ws = append(ws, w)
@@ -96,11 +101,11 @@ func LoadWorkflows(path string) ([]*Workflow, error) {
 	return ws, nil
 }
 
-func build(raw workflow) (*Workflow, error) {
+func build(raw trackerEntry, exec ExecutorConfig) (*Workflow, error) {
 	if raw.Name == "" {
 		return nil, fmt.Errorf("name: required")
 	}
-	w := &Workflow{Name: raw.Name, Tracker: raw.Tracker, Executor: raw.Executor, MaxConcurrent: 1}
+	w := &Workflow{Name: raw.Name, Tracker: raw.TrackerConfig, Executor: exec, MaxConcurrent: 1}
 	if raw.MaxConcurrent != nil {
 		w.MaxConcurrent = *raw.MaxConcurrent
 	}
@@ -125,16 +130,6 @@ func build(raw workflow) (*Workflow, error) {
 	default:
 		return nil, fmt.Errorf("tracker.kind: unknown kind %q (known: github)", w.Tracker.Kind)
 	}
-	switch w.Executor.Kind {
-	case "orca":
-		if w.Executor.Orca == nil {
-			w.Executor.Orca = &orca.Config{}
-		}
-		setDefault(&w.Executor.Orca.Agent, "claude")
-	default:
-		return nil, fmt.Errorf("executor.kind: unknown kind %q (known: orca)", w.Executor.Kind)
-	}
-
 	var err error
 	if w.prompt, err = parseTemplate("prompt", raw.Prompt); err != nil {
 		return nil, err
@@ -143,6 +138,21 @@ func build(raw workflow) (*Workflow, error) {
 		return nil, err
 	}
 	return w, nil
+}
+
+// buildExecutor は root の executor に既定値を入れる。省略すると orca（agent は claude）になる。
+func buildExecutor(e ExecutorConfig) (ExecutorConfig, error) {
+	setDefault(&e.Kind, "orca")
+	switch e.Kind {
+	case "orca":
+		if e.Orca == nil {
+			e.Orca = &orca.Config{}
+		}
+		setDefault(&e.Orca.Agent, "claude")
+	default:
+		return e, fmt.Errorf("executor.kind: unknown kind %q (known: orca)", e.Kind)
+	}
+	return e, nil
 }
 
 func parseTemplate(key, text string) (*template.Template, error) {
@@ -176,7 +186,7 @@ func (w *Workflow) Render(issue tracker.Issue, continuation bool) (string, error
 	return b.String(), nil
 }
 
-// Settings はユーザー単位の設定（config.yaml の workflows 以外）。
+// Settings はユーザー単位の設定（config.yaml の executor と trackers 以外）。
 type Settings struct {
 	Interval time.Duration // tick の間隔
 	// この利用率（%）以上なら、新しい Dispatch を見送る

@@ -54,16 +54,15 @@ func TestLoadWorkflowsFillsDefaultsAndRendersPrompts(t *testing.T) {
 	}
 }
 
-const validWorkflow = `workflows:
+const validWorkflow = `executor:
+  kind: orca
+trackers:
   - name: w
-    tracker:
-      kind: github
-      github:
-        project: https://github.com/users/ynny-github/projects/3
-        label: ready-for-agent
-        assignee: ynny-github
-    executor:
-      kind: orca
+    kind: github
+    github:
+      project: https://github.com/users/ynny-github/projects/3
+      label: ready-for-agent
+      assignee: ynny-github
     prompt: p
     continuation_prompt: c
 `
@@ -81,17 +80,17 @@ func TestLoadWorkflowsRejectsBadWorkflows(t *testing.T) {
 	for _, tc := range []struct {
 		name, src, want string
 	}{
-		{"unknown key", strings.Replace(validWorkflow, "      kind: orca\n", "      kind: orca\n      orca:\n        agnet: claude\n", 1), "agnet"},
-		{"block of another kind", strings.Replace(validWorkflow, "      kind: orca\n", "      kind: orca\n      linear: {}\n", 1), "linear"},
-		{"unknown tracker kind", strings.Replace(validWorkflow, "kind: github", "kind: jira", 1), "tracker.kind"},
-		{"unknown executor kind", strings.Replace(validWorkflow, "kind: orca", "kind: herdr", 1), "executor.kind"},
-		{"missing label", strings.Replace(validWorkflow, "        label: ready-for-agent\n", "", 1), "tracker.github.label"},
-		{"missing name", strings.Replace(validWorkflow, "  - name: w\n    tracker:", "  - tracker:", 1), "name: required"},
+		{"unknown key", strings.Replace(validWorkflow, "  kind: orca\n", "  kind: orca\n  orca:\n    agnet: claude\n", 1), "agnet"},
+		{"block of another kind", strings.Replace(validWorkflow, "    kind: github\n", "    kind: github\n    linear: {}\n", 1), "linear"},
+		{"unknown tracker kind", strings.Replace(validWorkflow, "    kind: github", "    kind: jira", 1), "tracker.kind"},
+		{"unknown executor kind", strings.Replace(validWorkflow, "executor:\n  kind: orca", "executor:\n  kind: herdr", 1), "executor.kind"},
+		{"missing label", strings.Replace(validWorkflow, "      label: ready-for-agent\n", "", 1), "tracker.github.label"},
+		{"missing name", strings.Replace(validWorkflow, "  - name: w\n    kind:", "  - kind:", 1), "name: required"},
 		{"zero max_concurrent", validWorkflow + "    max_concurrent: 0\n", "max_concurrent"},
 		{"missing prompt", strings.Replace(validWorkflow, "    prompt: p\n", "", 1), "prompt: required"},
 		{"missing continuation_prompt", strings.Replace(validWorkflow, "    continuation_prompt: c\n", "", 1), "continuation_prompt: required"},
 		{"bad template", strings.Replace(validWorkflow, "prompt: p", "prompt: '{{.Issue.Number'", 1), "prompt"},
-		{"duplicate name", validWorkflow + strings.TrimPrefix(validWorkflow, "workflows:\n"), "used twice"},
+		{"duplicate name", validWorkflow + strings.SplitAfter(validWorkflow, "trackers:\n")[1], "used twice"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := writeConfig(t, tc.src)
@@ -144,5 +143,15 @@ func TestLoadSettings(t *testing.T) {
 
 	if _, err := LoadSettings(writeConfig(t, "interval: 0s\n")); err == nil {
 		t.Error("LoadSettings accepted a zero interval")
+	}
+}
+
+func TestExecutorDefaultsToOrcaWithClaude(t *testing.T) {
+	ws, err := LoadWorkflows(writeConfig(t, strings.Replace(validWorkflow, "executor:\n  kind: orca\n", "", 1)))
+	if err != nil || len(ws) != 1 {
+		t.Fatal(ws, err)
+	}
+	if e := ws[0].Executor; e.Kind != "orca" || e.Orca == nil || e.Orca.Agent != "claude" {
+		t.Errorf("executor = %+v, want orca with agent claude", e)
 	}
 }

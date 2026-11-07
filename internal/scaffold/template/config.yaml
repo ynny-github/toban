@@ -1,4 +1,4 @@
-# toban の設定。interval と max_* は省略でき、省略すると下の既定値になる。
+# toban の設定。interval と max_* と executor は省略でき、省略すると下の既定値になる。
 # interval を変えたら `toban schedule install` をやり直す。
 
 # tick の間隔
@@ -8,23 +8,24 @@
 # max_session_percent: 80   # 5 時間枠
 # max_weekly_percent: 90    # 週次枠
 
-# Workflow。Project（Issue を管理する単位）ごとに 1 つ書く。下の例の # を外して、OWNER を直す。
-# workflows:
+# worker を起動する実行側。すべての trackers に共通
+# executor:
+#   kind: orca
+#   orca:
+#     agent: claude
+
+# Tracker の管理単位（GitHub なら Project）ごとに 1 件書く。下の例の # を外して、OWNER を直す。
+# trackers:
 #   - name: example          # ログに出す名前。ほかと重ならないようにする
-#     tracker:
-#       kind: github
-#       github:
-#         project: https://github.com/users/OWNER/projects/1  # State を管理する GitHub Project の URL
-#         label: ready-for-agent   # この Label を持つ Issue だけを Candidate にする
-#         assignee: OWNER          # この assignee を持つ Issue だけを Candidate にする
-#         # state_field: Status    # State を表す single select のフィールド名
-#         # ready: Todo            # Dispatch を待つ State
-#         # working: In Progress   # Dispatch したときに移す State
-#         # repos: [OWNER/repo]    # 空ならすべてのリポジトリ
-#     executor:
-#       kind: orca
-#       # orca:
-#       #   agent: claude
+#     kind: github
+#     github:
+#       project: https://github.com/users/OWNER/projects/1  # State を管理する GitHub Project の URL
+#       label: ready-for-agent   # この Label を持つ Issue だけを Candidate にする
+#       assignee: OWNER          # この assignee を持つ Issue だけを Candidate にする
+#       # state_field: Status    # State を表す single select のフィールド名
+#       # ready: Todo            # Dispatch を待つ State
+#       # working: In Progress   # Dispatch したときに移す State
+#       # repos: [OWNER/repo]    # 空ならすべてのリポジトリ
 #     max_concurrent: 1          # Working State の Issue がこの数に達するまで Dispatch する
 #     prompt: |                  # 最初に worker へ渡す。使える値は .Issue（URL, Repo, Number, Title, Body）
 #       {{.Issue.URL}}（{{.Issue.Repo}}#{{.Issue.Number}} 「{{.Issue.Title}}」）に取り組む。
