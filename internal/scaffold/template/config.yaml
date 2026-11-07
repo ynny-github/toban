@@ -1,5 +1,5 @@
 # toban の設定。interval と max_* と executor は省略でき、省略すると下の既定値になる。
-# interval を変えたら `toban schedule install` をやり直す。
+# interval を変えても、toban run の再起動は要らない（次の周から効く）。
 
 # tick の間隔
 # interval: 5m

@@ -8,15 +8,16 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
+	"os/signal"
 	"path/filepath"
-	"runtime"
 	"runtime/debug"
+	"syscall"
 	"time"
 
+	"github.com/ynny-github/toban/internal/daemon"
 	"github.com/ynny-github/toban/internal/executor/orca"
 	"github.com/ynny-github/toban/internal/scaffold"
-	"github.com/ynny-github/toban/internal/schedule"
+	"github.com/ynny-github/toban/internal/state"
 	"github.com/ynny-github/toban/internal/tick"
 	"github.com/ynny-github/toban/internal/tracker/github"
 	"github.com/ynny-github/toban/internal/workflow"
@@ -33,14 +34,19 @@ func versionString() string {
 	return version
 }
 
-const usage = `usage: toban [-config <dir>] <command>
+const usage = `usage: toban [-config <dir>] [-state <dir>] <command>
 
 設定のディレクトリ（config.yaml を置く。Tracker ごとの Workflow も config.yaml の trackers に書く）は必須。-config か環境変数 TOBAN_CONFIG で指定する。
+
+state ディレクトリ（ロック、PID、ログを置く）の既定は $XDG_STATE_HOME/toban（なければ ~/.local/state/toban）。-state か環境変数 TOBAN_STATE で変える。
 
 commands:
   init <dir>          <dir>（必須）に雛形（config.yaml）を作る
   tick                すべての Workflow を 1 回ずつ処理し、Candidate を Dispatch する
-  schedule install    tick を config.yaml の間隔で起動するジョブを登録する（macOS は launchd、Linux は systemd のユーザー timer）（やり直すと置き換わる）
+  run                 前面で tick を config.yaml の間隔で繰り返す（コンテナの起動コマンド向け）
+  start               run を背景に切り離して起動する（ログは state ディレクトリの toban.log。回転する）
+  stop                背景の run を止める（実行中の tick が終わってから止まる）
+  status              背景の run が動いているかを表示する
   version             バージョンを表示する（-version でも同じ。設定のディレクトリは不要）
 `
 
@@ -48,6 +54,7 @@ func main() {
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	flag.Usage = func() { fmt.Fprint(os.Stderr, usage); flag.PrintDefaults() }
 	configDir := flag.String("config", os.Getenv("TOBAN_CONFIG"), "設定のディレクトリ（既定は環境変数 TOBAN_CONFIG）")
+	stateOverride := flag.String("state", os.Getenv("TOBAN_STATE"), "state ディレクトリ（既定は環境変数 TOBAN_STATE）")
 	showVersion := flag.Bool("version", false, "バージョンを表示して終了する")
 	flag.Parse()
 	if *showVersion || flag.Arg(0) == "version" {
@@ -73,14 +80,13 @@ func main() {
 		err = runTick(context.Background(), log, *configDir)
 	case "init":
 		if err = scaffold.Init(*configDir); err == nil {
-			log.Info("created", "dir", *configDir, "next", "uncomment the trackers example in config.yaml and edit it, then run `toban schedule install`")
+			log.Info("created", "dir", *configDir, "next", "uncomment the trackers example in config.yaml and edit it, then run `toban start`")
 		}
-	case "schedule":
-		if flag.Arg(1) != "install" {
-			flag.Usage()
-			os.Exit(2)
+	case "run", "start", "stop", "status":
+		var dir string
+		if dir, err = state.Dir(*stateOverride); err == nil {
+			err = runDaemonCommand(log, flag.Arg(0), *configDir, dir)
 		}
-		err = installSchedule(log, *configDir)
 	default:
 		flag.Usage()
 		os.Exit(2)
@@ -162,60 +168,102 @@ func target(w *workflow.Workflow) (tick.Target, error) {
 	return t, nil
 }
 
-func installSchedule(log *slog.Logger, configDir string) error {
-	settings, err := workflow.LoadSettings(filepath.Join(configDir, "config.yaml"))
+// validate は config.yaml が読めることを確かめる（run を始める前に、誤りをその場で知らせるため）。
+func validate(configDir string) (workflow.Settings, error) {
+	path := filepath.Join(configDir, "config.yaml")
+	s, err := workflow.LoadSettings(path)
 	if err != nil {
+		return s, err
+	}
+	_, err = workflow.LoadWorkflows(path)
+	return s, err
+}
+
+func runDaemonCommand(log *slog.Logger, command, configDir, stateDir string) error {
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return err
 	}
-	self, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	if self, err = filepath.EvalSymlinks(self); err != nil {
-		return err
-	}
-	configDir, err = filepath.Abs(configDir)
-	if err != nil {
-		return err
-	}
-	// launchd と systemd は PATH を引き継がないので、tick が使うコマンドの場所をここで決めておく
-	var tools []string
-	for _, name := range []string{"gh", "orca", "git"} {
-		p, err := exec.LookPath(name)
+	p := daemon.PathsIn(stateDir)
+	switch command {
+	case "run":
+		return runLoop(log, configDir, p)
+	case "start":
+		if _, err := validate(configDir); err != nil {
+			return err
+		}
+		self, err := os.Executable()
 		if err != nil {
-			return fmt.Errorf("%s is not on PATH: %w", name, err)
-		}
-		if p, err = filepath.Abs(p); err != nil {
 			return err
 		}
-		tools = append(tools, p)
+		if self, err = filepath.EvalSymlinks(self); err != nil {
+			return err
+		}
+		if configDir, err = filepath.Abs(configDir); err != nil {
+			return err
+		}
+		pid, err := daemon.Start(self, []string{"-config", configDir, "-state", stateDir, "run"}, p)
+		if err != nil {
+			return err
+		}
+		log.Info("started", "pid", pid, "log", p.Log)
+	case "stop":
+		stopped, err := daemon.Stop(p, 30*time.Second)
+		if err != nil {
+			return err
+		}
+		if stopped {
+			log.Info("stopped")
+		} else {
+			log.Info("still finishing the current tick; it will stop afterwards")
+		}
+	case "status":
+		pid, running, err := daemon.Status(p)
+		if err != nil {
+			return err
+		}
+		if running {
+			log.Info("running", "pid", pid, "log", p.Log)
+		} else {
+			log.Info("not running")
+		}
 	}
-	home, err := os.UserHomeDir()
+	return nil
+}
+
+// runLoop は tick を config.yaml の間隔で繰り返す。設定は周ごとに読み直すので、間隔を変えても再起動は要らない。
+// 始める前の設定の誤りは終了にするが、始めたあとの tick の失敗はログに出して次の周に進む。
+func runLoop(log *slog.Logger, configDir string, p daemon.Paths) error {
+	settings, err := validate(configDir)
 	if err != nil {
 		return err
 	}
-	job := schedule.Job{Toban: self, ConfigDir: configDir, Tools: tools, Interval: settings.Interval}
-	switch runtime.GOOS {
-	case "linux":
-		configHome := os.Getenv("XDG_CONFIG_HOME")
-		if configHome == "" {
-			configHome = filepath.Join(home, ".config")
-		}
-		unitDir := filepath.Join(configHome, "systemd", "user")
-		if err := schedule.InstallSystemd(job, unitDir); err != nil {
-			return err
-		}
-		log.Info("installed", "units", unitDir, "interval", settings.Interval, "log", "journalctl --user -u "+schedule.Unit)
-		return nil
-	case "darwin":
-		job.Log = filepath.Join(home, "Library", "Logs", "toban", "tick.log")
-	default:
-		return fmt.Errorf("schedule install supports only macOS (launchd) and Linux (systemd), not %s", runtime.GOOS)
-	}
-	plistPath := filepath.Join(home, "Library", "LaunchAgents", schedule.Label+".plist")
-	if err := schedule.Install(job, plistPath); err != nil {
+	release, err := daemon.Acquire(p)
+	if err != nil {
 		return err
 	}
-	log.Info("installed", "plist", plistPath, "interval", settings.Interval, "log", job.Log)
+	defer release()
+	// start から起動されたときは TOBAN_LOG のファイルに、回転させながら書く
+	if path := os.Getenv("TOBAN_LOG"); path != "" {
+		// shortcut: 10 MiB × 3 世代で固定, 変えたくなったら config.yaml の設定にする
+		log = slog.New(slog.NewTextHandler(&daemon.RotatingFile{Path: path, Max: 10 << 20, Keep: 3}, nil))
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	log.Info("running", "pid", os.Getpid(), "interval", settings.Interval)
+	interval := settings.Interval
+	daemon.Loop(ctx, func() time.Duration {
+		if s, err := workflow.LoadSettings(filepath.Join(configDir, "config.yaml")); err != nil {
+			log.Error("cannot reload config.yaml; keeping the previous interval", "error", err)
+		} else {
+			interval = s.Interval
+		}
+		return interval
+	}, func() {
+		// ctx は渡さない。止める合図が来ても、Dispatch の途中で止めず、この tick を終える
+		if err := runTick(context.Background(), log, configDir); err != nil {
+			log.Error("tick failed", "error", err)
+		}
+	})
+	log.Info("stopped")
 	return nil
 }

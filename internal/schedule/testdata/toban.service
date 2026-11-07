@@ -1,7 +1,0 @@
-[Unit]
-Description=toban tick
-
-[Service]
-Type=oneshot
-Environment="PATH=/usr/local/bin:/home/dev/.local/bin:/usr/bin:/bin"
-ExecStart="/home/dev/.local/bin/toban" "-config" "/home/dev/toban-config" "tick"
