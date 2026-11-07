@@ -16,6 +16,18 @@ toban が起動した worker が、Issue を処理するときに従う手順。
 5. **PR を作る。** `create-pr` スキルを使う。main に直接 push しない。
 6. **Review に移す。** 最初に渡された `gh project item-edit` のコマンドで、この Issue の State を Review にする。
 
+## 人の返事を待つときの扱い
+
+作業の途中で人に質問し、その返事を待つときは、次の 3 つを行って止まる。
+
+1. 質問を Issue にコメントする。
+2. 最初に渡された `gh project item-edit` のコマンドで、State を Review にする。
+3. 作業を止める。
+
+State を Working State（In Progress）のままにしない。toban は Working State の Issue のセッションが止まっていると継続のプロンプトを送るため、返事が来る前に続きが何度も届いてしまう。
+
+返事が来て人が State を Ready State（Todo）に戻すと、toban が同じセッションに継続のプロンプトを送る。そのプロンプトを受けたら、Issue のコメントで返事を読んでから再開する。
+
 ## 進められないときの扱い
 
 仕様が足りない、blocker が open、環境の問題などで続けられないときは、次の 3 つを行って止まる。
