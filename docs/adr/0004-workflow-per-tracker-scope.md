@@ -1,6 +1,6 @@
 # Workflow はリポジトリごとではなく Tracker の管理単位ごとに定義し、リポジトリの外に置く
 
-Symphony はリポジトリごとに `WORKFLOW.md` を置くが、Issue をまとめる単位を決めているのは Tracker の側である（GitHub Project は複数のリポジトリの Issue を持てる）。そこで Workflow は Tracker の管理単位（GitHub なら Project）ごとに定義し、Issue がどのリポジトリのものかは Issue ごとに Tracker から得る。Workflow ファイルは、利用者が指定する設定のディレクトリ（`-config` か環境変数 `TOBAN_CONFIG`。既定の場所は持たない）の `workflows/` に置き、対象リポジトリの中には置かない。これで worker が worktree の中で自分への指示を書き換えて即座に効かせることも起きない。
+Symphony はリポジトリごとに `WORKFLOW.md` を置くが、Issue をまとめる単位を決めているのは Tracker の側である（GitHub Project は複数のリポジトリの Issue を持てる）。そこで Workflow は Tracker の管理単位（GitHub なら Project）ごとに定義し、Issue がどのリポジトリのものかは Issue ごとに Tracker から得る。Workflow は、利用者が指定する設定のディレクトリ（`-config` か環境変数 `TOBAN_CONFIG`。既定の場所は持たない）の `config.yaml` に置き（置き方は ADR 0007 で `workflows/*.md` から変えた）、対象リポジトリの中には置かない。これで worker が worktree の中で自分への指示を書き換えて即座に効かせることも起きない。
 
 ## Consequences
 
