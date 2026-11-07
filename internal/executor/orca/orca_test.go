@@ -2,6 +2,7 @@ package orca
 
 import (
 	"context"
+	"errors"
 	"os"
 	"slices"
 	"strings"
@@ -62,6 +63,7 @@ func TestDispatchCreatesWorktreeWhenIssueHasNone(t *testing.T) {
 		{"--issue", "2"},
 		{"--agent", "claude"},
 		{"--prompt", "do the work"},
+		{"--surface", "terminal"},
 	} {
 		if !hasFlag(args, kv[0], kv[1]) {
 			t.Errorf("worktree create args %q lack %s %s", args, kv[0], kv[1])
@@ -79,6 +81,7 @@ func TestDispatchCreatesWorktreeWhenIssueHasNone(t *testing.T) {
 func TestDispatchLaunchesAgentInExistingWorktree(t *testing.T) {
 	f := &fakeOrca{t: t, responses: map[string]string{
 		"worktree list": "worktree-list.json",
+		"worktree ps":   "worktree-ps-none.json",
 		"agent launch":  "agent-launch.json",
 	}}
 	e := New(Config{Agent: "claude"}, f.run)
@@ -96,6 +99,7 @@ func TestDispatchLaunchesAgentInExistingWorktree(t *testing.T) {
 		{"--worktree", "path:/home/dev/orca/workspaces/toban/gh-1"},
 		{"--agent", "claude"},
 		{"--prompt", "continue"},
+		{"--surface", "terminal"},
 	} {
 		if !hasFlag(args, kv[0], kv[1]) {
 			t.Errorf("agent launch args %q lack %s %s", args, kv[0], kv[1])
@@ -153,5 +157,99 @@ func TestDispatchRefusesTruncatedWorktreeList(t *testing.T) {
 		Issue: executor.Issue{Repo: "ynny-github/toban", Number: 2},
 	}); err == nil {
 		t.Error("Dispatch succeeded on a truncated worktree list")
+	}
+}
+
+// ---- 生きているセッションがある worktree（ADR 0006）----
+
+var gh1 = executor.Issue{Repo: "ynny-github/toban", Number: 1} // worktree-list.json では gh-1 に紐づく
+
+func sessionRequest() executor.Request {
+	return executor.Request{Issue: gh1, Prompt: "first prompt", ContinuationPrompt: "keep going"}
+}
+
+func sessionFake(t *testing.T, ps, send string) *fakeOrca {
+	return &fakeOrca{t: t, responses: map[string]string{
+		"worktree list": "worktree-list.json",
+		"worktree ps":   ps,
+		"terminal list": "terminal-list.json",
+		"terminal send": send,
+	}}
+}
+
+func TestDispatchSendsOnlyTheContinuationToAFinishedSession(t *testing.T) {
+	f := sessionFake(t, "worktree-ps-done.json", "terminal-send.json")
+
+	got, err := New(Config{Agent: "claude"}, f.run).Dispatch(context.Background(), sessionRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	args := f.call("terminal send")
+	for _, kv := range [][2]string{{"--terminal", "term_gh1"}, {"--text", "keep going"}} {
+		if !hasFlag(args, kv[0], kv[1]) {
+			t.Errorf("terminal send args %q lack %s %s", args, kv[0], kv[1])
+		}
+	}
+	if !slices.Contains(args, "--enter") || !slices.Contains(args, "--wait-submit") {
+		t.Errorf("terminal send args %q lack --enter or --wait-submit", args)
+	}
+	for _, c := range f.calls {
+		if c[0] == "agent" || c[0] == "worktree" && c[1] == "create" {
+			t.Errorf("started a new agent although a session was alive: %q", c)
+		}
+	}
+	if want := (executor.Result{Worktree: "/home/dev/orca/workspaces/toban/gh-1", Session: "term_gh1"}); got != want {
+		t.Errorf("got %+v, want %+v", got, want)
+	}
+}
+
+func TestCheckReportsBusyForAWorkingSession(t *testing.T) {
+	f := sessionFake(t, "worktree-ps-working.json", "terminal-send.json")
+
+	err := New(Config{Agent: "claude"}, f.run).Check(context.Background(), gh1)
+
+	if !errors.Is(err, executor.ErrBusy) {
+		t.Errorf("err = %v, want ErrBusy", err)
+	}
+}
+
+func TestDispatchLaunchesWhenNoLiveSessionOfThisAgent(t *testing.T) {
+	// 端末が終わった claude のセッションと、別の種類（codex）の作業中のセッションだけがある
+	f := &fakeOrca{t: t, responses: map[string]string{
+		"worktree list": "worktree-list.json",
+		"worktree ps":   "worktree-ps-dead.json",
+		"agent launch":  "agent-launch.json",
+	}}
+
+	if _, err := New(Config{Agent: "claude"}, f.run).Dispatch(context.Background(), sessionRequest()); err != nil {
+		t.Fatal(err)
+	}
+	if !hasFlag(f.call("agent launch"), "--prompt", "first prompt") {
+		t.Errorf("a new session did not get the first prompt: %q", f.calls)
+	}
+}
+
+func TestDispatchRefusesWhenItCannotTellWhatToDo(t *testing.T) {
+	for _, c := range []struct{ name, ps, send, want string }{
+		{"unknown state", "worktree-ps-unknown.json", "terminal-send.json", "unknown state"},
+		{"two sessions", "worktree-ps-two.json", "terminal-send.json", "2 live"},
+		{"truncated", "worktree-ps-truncated.json", "terminal-send.json", "truncated"},
+		{"not accepted", "worktree-ps-done.json", "terminal-send-not-accepted.json", "did not accept"},
+		{"permission menu", "worktree-ps-done.json", "terminal-send-blocked.json", "agent_prompt_blocked"},
+		{"stale handle", "worktree-ps-done.json", "error.json", "terminal_handle_stale"},
+	} {
+		f := sessionFake(t, c.ps, c.send)
+
+		_, err := New(Config{Agent: "claude"}, f.run).Dispatch(context.Background(), sessionRequest())
+
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: err = %v, want one containing %q", c.name, err, c.want)
+		}
+		for _, call := range f.calls { // 新しく起動して二重にしない
+			if call[0] == "agent" || call[0] == "worktree" && call[1] == "create" {
+				t.Errorf("%s: started a new agent: %q", c.name, call)
+			}
+		}
 	}
 }

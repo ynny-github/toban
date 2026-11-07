@@ -1,0 +1,19 @@
+{
+  "id": "x",
+  "ok": true,
+  "result": {
+    "terminals": [
+      {
+        "handle": "term_other",
+        "tabId": "tab-9",
+        "leafId": "leaf-9"
+      },
+      {
+        "handle": "term_gh1",
+        "tabId": "tab-1",
+        "leafId": "leaf-1",
+        "agentIdentity": "claude"
+      }
+    ]
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "id": "x",
+  "ok": true,
+  "result": {
+    "send": {
+      "handle": "term_gh1",
+      "accepted": true,
+      "bytesWritten": 20,
+      "prompt": {
+        "requestId": "r1",
+        "stages": [
+          "input_accepted"
+        ]
+      }
+    },
+    "mutation": {
+      "requestId": "r1",
+      "replayed": false
+    },
+    "warnings": []
+  }
+}

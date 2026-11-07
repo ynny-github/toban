@@ -120,9 +120,13 @@ func setDefault(field *string, value string) {
 }
 
 // Render は Issue を渡してプロンプトのテンプレートを展開する。
-func (w *Workflow) Render(issue tracker.Issue) (string, error) {
+// continuation は、生きているセッションへ続きの指示を送るときに真にする（ADR 0006）。
+func (w *Workflow) Render(issue tracker.Issue, continuation bool) (string, error) {
 	var b strings.Builder
-	if err := w.prompt.Execute(&b, struct{ Issue tracker.Issue }{issue}); err != nil {
+	if err := w.prompt.Execute(&b, struct {
+		Issue        tracker.Issue
+		Continuation bool
+	}{issue, continuation}); err != nil {
 		return "", fmt.Errorf("%s: prompt template: %w", w.Path, err)
 	}
 	return b.String(), nil

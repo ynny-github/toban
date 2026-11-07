@@ -1,0 +1,8 @@
+{
+  "id": "x",
+  "ok": false,
+  "error": {
+    "code": "agent_prompt_blocked",
+    "message": "agent_prompt_blocked The agent shows a permission menu"
+  }
+}

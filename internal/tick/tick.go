@@ -21,7 +21,7 @@ type Target struct {
 	Tracker       tracker.Tracker
 	Executor      executor.Executor
 	MaxConcurrent int
-	Render        func(tracker.Issue) (string, error)
+	Render        func(issue tracker.Issue, continuation bool) (string, error)
 }
 
 // Run はすべての Target を順に処理する。1 つの Target で失敗しても残りは続け、失敗をまとめて返す。
@@ -52,6 +52,9 @@ func runOne(ctx context.Context, log *slog.Logger, t Target) error {
 			break
 		}
 		stop, err := dispatch(ctx, log.With("issue", fmt.Sprintf("%s#%d", issue.Repo, issue.Number)), t, issue)
+		if errors.Is(err, executor.ErrBusy) { // 失敗ではない。State は動かさず、次の Candidate に進む
+			continue
+		}
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s#%d: %w", issue.Repo, issue.Number, err))
 			if stop {
@@ -71,16 +74,28 @@ func dispatch(ctx context.Context, log *slog.Logger, t Target, issue tracker.Iss
 		log.Warn("skipped; State not moved", "error", err)
 		return false, err
 	}
-	body, err := t.Render(issue)
+	body, err := t.Render(issue, false)
 	if err != nil {
+		return false, err
+	}
+	continuation, err := t.Render(issue, true)
+	if err != nil {
+		return false, err
+	}
+	eissue := executor.Issue{Repo: issue.Repo, Number: issue.Number}
+	if err := t.Executor.Check(ctx, eissue); err != nil {
+		if errors.Is(err, executor.ErrBusy) {
+			log.Info("skipped; the session is still working; State not moved")
+		}
 		return false, err
 	}
 	if err := t.Tracker.MoveToWorking(ctx, issue); err != nil {
 		return true, err
 	}
 	res, err := t.Executor.Dispatch(ctx, executor.Request{
-		Issue:  executor.Issue{Repo: issue.Repo, Number: issue.Number},
-		Prompt: strings.TrimRight(t.Tracker.Preamble(issue), "\n") + "\n\n" + body,
+		Issue:              eissue,
+		Prompt:             strings.TrimRight(t.Tracker.Preamble(issue), "\n") + "\n\n" + body,
+		ContinuationPrompt: continuation,
 	})
 	if err != nil {
 		if rerr := t.Tracker.Restore(ctx, issue); rerr != nil {

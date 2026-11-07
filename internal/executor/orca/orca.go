@@ -33,26 +33,99 @@ type Executor struct {
 
 func New(cfg Config, run Runner) *Executor { return &Executor{cfg: cfg, run: run} }
 
+// plan は Issue の作業場所と、続きの指示を送る先のセッションを決める。
+// path が空なら worktree を作り、pane が空なら新しく起動し、pane があればそのセッションへ送る（ADR 0006）。
+type plan struct{ path, pane string }
+
+func (e *Executor) plan(ctx context.Context, issue executor.Issue) (plan, error) {
+	path, err := e.findWorktree(ctx, issue)
+	if err != nil || path == "" {
+		return plan{}, err
+	}
+	live, err := e.liveAgents(ctx, path)
+	if err != nil {
+		return plan{}, err
+	}
+	switch len(live) {
+	case 0:
+		return plan{path: path}, nil
+	case 1:
+		switch live[0].State {
+		case "done":
+			return plan{path: path, pane: live[0].PaneKey}, nil
+		case "working":
+			return plan{}, executor.ErrBusy
+		}
+		return plan{}, fmt.Errorf("%s has a %s session in the unknown state %q; not sending", path, e.cfg.Agent, live[0].State)
+	}
+	return plan{}, fmt.Errorf("%s has %d live %s sessions; cannot tell which to send to", path, len(live), e.cfg.Agent)
+}
+
+type agentInfo struct {
+	PaneKey    string `json:"paneKey"` // "<tabId>:<leafId>"
+	State      string `json:"state"`
+	AgentType  string `json:"agentType"`
+	HasLivePty bool   `json:"hasLivePty"`
+}
+
+// liveAgents は path の worktree で生きている、設定した種類のエージェントのセッションを返す。
+func (e *Executor) liveAgents(ctx context.Context, path string) ([]agentInfo, error) {
+	var ps struct {
+		Worktrees []struct {
+			Path   string      `json:"path"`
+			Agents []agentInfo `json:"agents"`
+		} `json:"worktrees"`
+		Truncated bool `json:"truncated"`
+	}
+	if err := e.call(ctx, &ps, "worktree", "ps", "--limit", "1000", "--json"); err != nil {
+		return nil, err
+	}
+	if ps.Truncated {
+		return nil, fmt.Errorf("orca worktree ps: result is truncated; cannot tell whether %s has a live session", path)
+	}
+	var live []agentInfo
+	for _, w := range ps.Worktrees {
+		if w.Path != path {
+			continue
+		}
+		for _, a := range w.Agents {
+			if a.AgentType == e.cfg.Agent && a.HasLivePty {
+				live = append(live, a)
+			}
+		}
+	}
+	return live, nil
+}
+
+func (e *Executor) Check(ctx context.Context, issue executor.Issue) error {
+	_, err := e.plan(ctx, issue)
+	return err
+}
+
 func (e *Executor) Dispatch(ctx context.Context, req executor.Request) (executor.Result, error) {
-	path, err := e.findWorktree(ctx, req.Issue)
+	p, err := e.plan(ctx, req.Issue)
 	if err != nil {
 		return executor.Result{}, err
 	}
-	if path != "" {
+	if p.pane != "" {
+		return e.send(ctx, p, req.ContinuationPrompt)
+	}
+	if p.path != "" {
 		var launched struct {
 			Outcome struct {
 				Handle string `json:"handle"`
 			} `json:"outcome"`
 		}
 		err := e.call(ctx, &launched, "agent", "launch",
-			"--worktree", "path:"+path,
+			"--worktree", "path:"+p.path,
 			"--agent", e.cfg.Agent,
 			"--prompt", req.Prompt,
+			"--surface", "terminal", // チャット画面だと、あとで terminal send が届かない
 			"--json")
 		if err != nil {
 			return executor.Result{}, err
 		}
-		return executor.Result{Worktree: path, Session: launched.Outcome.Handle}, nil
+		return executor.Result{Worktree: p.path, Session: launched.Outcome.Handle}, nil
 	}
 
 	var created struct {
@@ -72,11 +145,51 @@ func (e *Executor) Dispatch(ctx context.Context, req executor.Request) (executor
 		"--issue", n,
 		"--agent", e.cfg.Agent,
 		"--prompt", req.Prompt,
+		"--surface", "terminal",
 		"--no-parent", "--json")
 	if err != nil {
 		return executor.Result{}, err
 	}
 	return executor.Result{Worktree: created.Worktree.Path, Session: created.Launch.Outcome.Handle}, nil
+}
+
+// send は生きているセッションに続きの指示を送る。受け付けられなければ失敗にし、新しく起動はしない。
+func (e *Executor) send(ctx context.Context, p plan, prompt string) (executor.Result, error) {
+	if prompt == "" {
+		return executor.Result{}, fmt.Errorf("no continuation prompt to send to %s", p.path)
+	}
+	var list struct {
+		Terminals []struct {
+			Handle string `json:"handle"`
+			TabID  string `json:"tabId"`
+			LeafID string `json:"leafId"`
+		} `json:"terminals"`
+	}
+	if err := e.call(ctx, &list, "terminal", "list", "--worktree", "path:"+p.path, "--json"); err != nil {
+		return executor.Result{}, err
+	}
+	handle := ""
+	for _, t := range list.Terminals {
+		if t.TabID+":"+t.LeafID == p.pane {
+			handle = t.Handle
+		}
+	}
+	if handle == "" {
+		return executor.Result{}, fmt.Errorf("orca terminal list: no terminal for the agent pane %s in %s", p.pane, p.path)
+	}
+	var sent struct {
+		Send struct {
+			Accepted bool `json:"accepted"`
+		} `json:"send"`
+	}
+	if err := e.call(ctx, &sent, "terminal", "send",
+		"--terminal", handle, "--text", prompt, "--enter", "--wait-submit", "10", "--json"); err != nil {
+		return executor.Result{}, err
+	}
+	if !sent.Send.Accepted {
+		return executor.Result{}, fmt.Errorf("orca terminal send: %s did not accept the prompt", handle)
+	}
+	return executor.Result{Worktree: p.path, Session: handle}, nil
 }
 
 // findWorktree は Issue に紐付いた worktree のパスを返す。なければ空文字列。

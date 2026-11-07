@@ -1,0 +1,10 @@
+{
+  "id": "x",
+  "ok": true,
+  "result": {
+    "send": {
+      "handle": "term_gh1",
+      "accepted": false
+    }
+  }
+}

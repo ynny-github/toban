@@ -15,8 +15,12 @@ executor:
   #   agent: claude
 max_concurrent: 1            # Working State の Issue がこの数に達するまで Dispatch する
 ---
+{{if .Continuation -}}
+{{.Issue.URL}} が再び Ready に戻り、State を Working に移した。Issue の最新のコメントを読んで、作業を再開する。
+{{- else -}}
 {{.Issue.URL}}（{{.Issue.Repo}}#{{.Issue.Number}} 「{{.Issue.Title}}」）に取り組む。
 
 このリポジトリのルートの WORKFLOW.md に沿って進める。
 
 {{.Issue.Body}}
+{{- end}}

@@ -36,7 +36,7 @@ func TestLoadFillsDefaultsAndRendersPrompt(t *testing.T) {
 		t.Errorf("max_concurrent = %d, want 2", w.MaxConcurrent)
 	}
 
-	got, err := w.Render(tracker.Issue{Repo: "ynny-github/toban", Number: 3, Title: "Workflow を読む", Body: "本文"})
+	got, err := w.Render(tracker.Issue{Repo: "ynny-github/toban", Number: 3, Title: "Workflow を読む", Body: "本文"}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,5 +135,20 @@ func TestLoadSettings(t *testing.T) {
 
 	if _, err := LoadSettings(writeWorkflow(t, "interval: 0s\n")); err == nil {
 		t.Error("LoadSettings accepted a zero interval")
+	}
+}
+
+func TestRenderSwitchesOnContinuation(t *testing.T) {
+	w, err := Load(writeWorkflow(t, "---\n"+validHead+"---\n{{if .Continuation}}続き: {{.Issue.URL}}{{else}}最初: {{.Issue.Title}}{{end}}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	issue := tracker.Issue{Title: "題", URL: "https://example.com/1"}
+
+	first, _ := w.Render(issue, false)
+	again, _ := w.Render(issue, true)
+
+	if first != "最初: 題\n" || again != "続き: https://example.com/1\n" {
+		t.Errorf("first = %q, continuation = %q", first, again)
 	}
 }

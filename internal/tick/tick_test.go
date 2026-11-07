@@ -43,9 +43,12 @@ func (f *fakeTracker) CheckFile(_ context.Context, i tracker.Issue, path string)
 func (f *fakeTracker) Preamble(i tracker.Issue) string { return "PREAMBLE " + i.URL }
 
 type fakeExecutor struct {
-	err  error
-	reqs []executor.Request
+	err      error
+	checkErr map[int]error // Issue の番号ごとの Check の結果
+	reqs     []executor.Request
 }
+
+func (f *fakeExecutor) Check(_ context.Context, i executor.Issue) error { return f.checkErr[i.Number] }
 
 func (f *fakeExecutor) Dispatch(_ context.Context, r executor.Request) (executor.Result, error) {
 	f.reqs = append(f.reqs, r)
@@ -56,7 +59,12 @@ func issue(n int) tracker.Issue {
 	return tracker.Issue{ID: "item", Repo: "o/r", Number: n, URL: fmt.Sprintf("https://example.com/%d", n), State: "Todo"}
 }
 
-func render(i tracker.Issue) (string, error) { return "BODY", nil }
+func render(i tracker.Issue, continuation bool) (string, error) {
+	if continuation {
+		return "CONTINUE", nil
+	}
+	return "BODY", nil
+}
 
 var quiet = slog.New(slog.NewTextHandler(io.Discard, nil))
 
@@ -72,7 +80,7 @@ func TestRunDispatchesCandidatesUpToFreeSlots(t *testing.T) {
 	if !slices.Equal(tr.moved, []int{1}) {
 		t.Errorf("moved = %v, want [1]", tr.moved)
 	}
-	want := executor.Request{Issue: executor.Issue{Repo: "o/r", Number: 1}, Prompt: "PREAMBLE https://example.com/1\n\nBODY"}
+	want := executor.Request{Issue: executor.Issue{Repo: "o/r", Number: 1}, Prompt: "PREAMBLE https://example.com/1\n\nBODY", ContinuationPrompt: "CONTINUE"}
 	if len(ex.reqs) != 1 || ex.reqs[0] != want {
 		t.Errorf("requests = %+v, want [%+v]", ex.reqs, want)
 	}
@@ -150,5 +158,33 @@ func TestRunStopsAfterALaunchFails(t *testing.T) {
 	}
 	if !slices.Equal(tr.moved, []int{1}) {
 		t.Errorf("moved = %v, want [1]: a failing Executor should not be tried on every Candidate", tr.moved)
+	}
+}
+
+func TestRunLeavesAWorkingSessionAloneAndTakesTheNext(t *testing.T) {
+	tr := &fakeTracker{poll: tracker.Poll{Candidates: []tracker.Issue{issue(1), issue(2)}}}
+	ex := &fakeExecutor{checkErr: map[int]error{1: executor.ErrBusy}}
+
+	err := Run(context.Background(), quiet, []Target{{Name: "w", Tracker: tr, Executor: ex, MaxConcurrent: 1, Render: render}})
+
+	if err != nil {
+		t.Errorf("a session that is still working is not a failure: %v", err)
+	}
+	if !slices.Equal(tr.moved, []int{2}) || len(tr.restored) != 0 {
+		t.Errorf("moved = %v, restored = %v, want only #2 moved and nothing restored", tr.moved, tr.restored)
+	}
+}
+
+func TestRunDoesNotMoveStateWhenTheExecutorCannotDispatch(t *testing.T) {
+	tr := &fakeTracker{poll: tracker.Poll{Candidates: []tracker.Issue{issue(1)}}}
+	ex := &fakeExecutor{checkErr: map[int]error{1: errors.New("two live sessions")}}
+
+	err := Run(context.Background(), quiet, []Target{{Name: "w", Tracker: tr, Executor: ex, MaxConcurrent: 1, Render: render}})
+
+	if err == nil {
+		t.Error("Run hid the Executor's refusal")
+	}
+	if len(tr.moved) != 0 || len(ex.reqs) != 0 {
+		t.Errorf("moved = %v, requests = %d, want none", tr.moved, len(ex.reqs))
 	}
 }
