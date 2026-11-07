@@ -1,4 +1,4 @@
-# toban の設定。どのキーも省略でき、省略すると下の既定値になる。
+# toban の設定。interval と max_* は省略でき、省略すると下の既定値になる。
 # interval を変えたら `toban schedule install` をやり直す。
 
 # tick の間隔
@@ -7,3 +7,30 @@
 # この利用率（%）以上なら、新しい Dispatch を見送る（Orca が返す Claude の利用枠）
 # max_session_percent: 80   # 5 時間枠
 # max_weekly_percent: 90    # 週次枠
+
+# Workflow。Project（Issue を管理する単位）ごとに 1 つ書く。下の例の # を外して、OWNER を直す。
+# workflows:
+#   - name: example          # ログに出す名前。ほかと重ならないようにする
+#     tracker:
+#       kind: github
+#       github:
+#         project: https://github.com/users/OWNER/projects/1  # State を管理する GitHub Project の URL
+#         label: ready-for-agent   # この Label を持つ Issue だけを Candidate にする
+#         assignee: OWNER          # この assignee を持つ Issue だけを Candidate にする
+#         # state_field: Status    # State を表す single select のフィールド名
+#         # ready: Todo            # Dispatch を待つ State
+#         # working: In Progress   # Dispatch したときに移す State
+#         # repos: [OWNER/repo]    # 空ならすべてのリポジトリ
+#     executor:
+#       kind: orca
+#       # orca:
+#       #   agent: claude
+#     max_concurrent: 1          # Working State の Issue がこの数に達するまで Dispatch する
+#     prompt: |                  # 最初に worker へ渡す。使える値は .Issue（URL, Repo, Number, Title, Body）
+#       {{.Issue.URL}}（{{.Issue.Repo}}#{{.Issue.Number}} 「{{.Issue.Title}}」）に取り組む。
+#
+#       このリポジトリのルートの WORKFLOW.md に沿って進める。
+#
+#       {{.Issue.Body}}
+#     continuation_prompt: |     # 生きているセッションへ送る続きの指示
+#       {{.Issue.URL}} が再び Ready に戻り、State を Working に移した。Issue の最新のコメントを読んで、作業を再開する。

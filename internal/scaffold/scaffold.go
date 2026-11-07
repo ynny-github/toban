@@ -13,7 +13,6 @@ import (
 var files embed.FS
 
 // Init は dir に雛形を書く。すでにあるファイルは上書きせず、1 つでもあればエラーにする（何も書かない）。
-// workflows/ の中の *.sample は、拡張子を .md にするまで読まれない。
 func Init(dir string) error {
 	var paths []string
 	err := fs.WalkDir(files, "template", func(p string, d fs.DirEntry, err error) error {

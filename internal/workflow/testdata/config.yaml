@@ -1,1 +1,28 @@
 interval: 2m
+workflows:
+  - name: toban
+    tracker:
+      kind: github
+      github:
+        project: https://github.com/users/ynny-github/projects/3
+        label: ready-for-agent
+        assignee: ynny-github
+    executor:
+      kind: orca
+    max_concurrent: 2
+    prompt: |
+      {{.Issue.Repo}}#{{.Issue.Number}} 「{{.Issue.Title}}」に取り組む。
+
+      {{.Issue.Body}}
+    continuation_prompt: 続き {{.Issue.URL}}
+  - name: another
+    tracker:
+      kind: github
+      github:
+        project: https://github.com/orgs/example/projects/1
+        label: ready-for-agent
+        assignee: example
+    executor:
+      kind: orca
+    prompt: 最初
+    continuation_prompt: 続き

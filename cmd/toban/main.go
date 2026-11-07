@@ -34,10 +34,10 @@ func versionString() string {
 
 const usage = `usage: toban [-config <dir>] <command>
 
-設定のディレクトリ（config.yaml と workflows/ を置く）は必須。-config か環境変数 TOBAN_CONFIG で指定する。
+設定のディレクトリ（config.yaml を置く。Workflow も config.yaml に書く）は必須。-config か環境変数 TOBAN_CONFIG で指定する。
 
 commands:
-  init <dir>          <dir>（必須）に雛形（config.yaml と workflows/example.md.sample）を作る
+  init <dir>          <dir>（必須）に雛形（config.yaml）を作る
   tick                すべての Workflow を 1 回ずつ処理し、Candidate を Dispatch する
   schedule install    tick を config.yaml の間隔で起動するジョブを launchd に登録する（やり直すと置き換わる）
   version             バージョンを表示する（-version でも同じ。設定のディレクトリは不要）
@@ -72,7 +72,7 @@ func main() {
 		err = runTick(context.Background(), log, *configDir)
 	case "init":
 		if err = scaffold.Init(*configDir); err == nil {
-			log.Info("created", "dir", *configDir, "next", "edit workflows/example.md.sample, rename it to .md, then run `toban schedule install`")
+			log.Info("created", "dir", *configDir, "next", "uncomment the workflows example in config.yaml and edit it, then run `toban schedule install`")
 		}
 	case "schedule":
 		if flag.Arg(1) != "install" {
@@ -119,13 +119,16 @@ func runTick(ctx context.Context, log *slog.Logger, configDir string) error {
 		return nil
 	}
 
-	// 読めない Workflow があっても、読めたものは処理する
-	workflows, loadErr := workflow.LoadDir(filepath.Join(configDir, "workflows"))
+	if _, err := os.Stat(filepath.Join(configDir, "workflows")); err == nil {
+		log.Warn("workflows/ is no longer read; move each Workflow into the workflows list in config.yaml")
+	}
+	// Workflow に誤りがあれば、どの Project も処理しない（誤った設定のまま一部だけ動かさない）
+	workflows, err := workflow.LoadWorkflows(filepath.Join(configDir, "config.yaml"))
+	if err != nil {
+		return err
+	}
 	var targets []tick.Target
 	var errs []error
-	if loadErr != nil {
-		errs = append(errs, loadErr)
-	}
 	for _, w := range workflows {
 		t, err := target(w)
 		if err != nil {
@@ -142,12 +145,12 @@ func runTick(ctx context.Context, log *slog.Logger, configDir string) error {
 
 // target は Workflow の kind に応じて、組み込みの Tracker と Executor を組み立てる。
 func target(w *workflow.Workflow) (tick.Target, error) {
-	t := tick.Target{Name: w.Path, MaxConcurrent: w.MaxConcurrent, Render: w.Render}
+	t := tick.Target{Name: w.Name, MaxConcurrent: w.MaxConcurrent, Render: w.Render}
 	switch w.Tracker.Kind {
 	case "github":
 		tr, err := github.New(*w.Tracker.GitHub, github.Command("gh"))
 		if err != nil {
-			return t, fmt.Errorf("%s: %w", w.Path, err)
+			return t, fmt.Errorf("%s: %w", w.Name, err)
 		}
 		t.Tracker = tr
 	}

@@ -1,4 +1,4 @@
-// Package workflow は Workflow ファイル（YAML の front matter と、プロンプトのテンプレートの本文）を読む。
+// Package workflow は設定のファイル（config.yaml）を読む。ユーザー単位の設定と、Project ごとの Workflow が入っている。
 package workflow
 
 import (
@@ -8,7 +8,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"strings"
 	"text/template"
 	"time"
@@ -21,11 +20,12 @@ import (
 )
 
 type Workflow struct {
-	Path          string
+	Name          string
 	Tracker       TrackerConfig
 	Executor      ExecutorConfig
 	MaxConcurrent int
 	prompt        *template.Template
+	continuation  *template.Template
 }
 
 // TrackerConfig は kind で選んだ Tracker と、kind と同じ名前のブロックの設定。
@@ -39,40 +39,70 @@ type ExecutorConfig struct {
 	Orca *orca.Config `yaml:"orca"`
 }
 
-type frontMatter struct {
-	Tracker       TrackerConfig  `yaml:"tracker"`
-	Executor      ExecutorConfig `yaml:"executor"`
-	MaxConcurrent *int           `yaml:"max_concurrent"`
+// file は config.yaml の全体。知らないキーはエラーにする。
+type file struct {
+	Interval          string     `yaml:"interval"`
+	MaxSessionPercent *float64   `yaml:"max_session_percent"`
+	MaxWeeklyPercent  *float64   `yaml:"max_weekly_percent"`
+	Workflows         []workflow `yaml:"workflows"`
 }
 
-func Load(path string) (*Workflow, error) {
+type workflow struct {
+	Name               string         `yaml:"name"`
+	Tracker            TrackerConfig  `yaml:"tracker"`
+	Executor           ExecutorConfig `yaml:"executor"`
+	MaxConcurrent      *int           `yaml:"max_concurrent"`
+	Prompt             string         `yaml:"prompt"`
+	ContinuationPrompt string         `yaml:"continuation_prompt"`
+}
+
+// read は config.yaml を読む。ファイルがなければ空として扱う。
+func read(path string) (file, error) {
+	var f file
 	src, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
+	if errors.Is(err, fs.ErrNotExist) {
+		return f, nil
 	}
-	w, err := parse(src)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return f, err
 	}
-	w.Path = path
-	return w, nil
+	dec := yaml.NewDecoder(bytes.NewReader(src))
+	dec.KnownFields(true) // 知らないキーと、選べない kind のブロックはここでエラーになる
+	if err := dec.Decode(&f); err != nil && !errors.Is(err, io.EOF) {
+		return f, fmt.Errorf("%s: %w", path, err)
+	}
+	return f, nil
 }
 
-func parse(src []byte) (*Workflow, error) {
-	head, body, ok := strings.Cut(strings.TrimPrefix(string(src), "---\n"), "\n---\n")
-	if !ok || !bytes.HasPrefix(src, []byte("---\n")) {
-		return nil, fmt.Errorf("no YAML front matter between --- lines")
-	}
-	var fm frontMatter
-	dec := yaml.NewDecoder(strings.NewReader(head))
-	dec.KnownFields(true) // 知らないキーと、選べない kind のブロックはここでエラーになる
-	if err := dec.Decode(&fm); err != nil {
+// LoadWorkflows は config.yaml の workflows を読む。1 つでも誤りがあれば、どれも返さずエラーにする。
+func LoadWorkflows(path string) ([]*Workflow, error) {
+	f, err := read(path)
+	if err != nil {
 		return nil, err
 	}
+	var ws []*Workflow
+	seen := map[string]bool{}
+	for i, raw := range f.Workflows {
+		w, err := build(raw)
+		if err == nil && seen[w.Name] {
+			err = fmt.Errorf("name: %q is used twice", w.Name)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("%s: workflows[%d]: %w", path, i, err)
+		}
+		seen[w.Name] = true
+		ws = append(ws, w)
+	}
+	return ws, nil
+}
 
-	w := &Workflow{Tracker: fm.Tracker, Executor: fm.Executor, MaxConcurrent: 1}
-	if fm.MaxConcurrent != nil {
-		w.MaxConcurrent = *fm.MaxConcurrent
+func build(raw workflow) (*Workflow, error) {
+	if raw.Name == "" {
+		return nil, fmt.Errorf("name: required")
+	}
+	w := &Workflow{Name: raw.Name, Tracker: raw.Tracker, Executor: raw.Executor, MaxConcurrent: 1}
+	if raw.MaxConcurrent != nil {
+		w.MaxConcurrent = *raw.MaxConcurrent
 	}
 	if w.MaxConcurrent < 1 {
 		return nil, fmt.Errorf("max_concurrent: must be 1 or more, got %d", w.MaxConcurrent)
@@ -105,12 +135,25 @@ func parse(src []byte) (*Workflow, error) {
 		return nil, fmt.Errorf("executor.kind: unknown kind %q (known: orca)", w.Executor.Kind)
 	}
 
-	t, err := template.New("prompt").Option("missingkey=error").Parse(body)
-	if err != nil {
-		return nil, fmt.Errorf("prompt template: %w", err)
+	var err error
+	if w.prompt, err = parseTemplate("prompt", raw.Prompt); err != nil {
+		return nil, err
 	}
-	w.prompt = t
+	if w.continuation, err = parseTemplate("continuation_prompt", raw.ContinuationPrompt); err != nil {
+		return nil, err
+	}
 	return w, nil
+}
+
+func parseTemplate(key, text string) (*template.Template, error) {
+	if strings.TrimSpace(text) == "" {
+		return nil, fmt.Errorf("%s: required", key)
+	}
+	t, err := template.New(key).Option("missingkey=error").Parse(text)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", key, err)
+	}
+	return t, nil
 }
 
 func setDefault(field *string, value string) {
@@ -119,40 +162,21 @@ func setDefault(field *string, value string) {
 	}
 }
 
-// Render は Issue を渡してプロンプトのテンプレートを展開する。
-// continuation は、生きているセッションへ続きの指示を送るときに真にする（ADR 0006）。
+// Render は Issue を渡して、最初のプロンプトを展開する。
+// continuation が真のときは、生きているセッションへ送る続きの指示を展開する（ADR 0006）。
 func (w *Workflow) Render(issue tracker.Issue, continuation bool) (string, error) {
+	t := w.prompt
+	if continuation {
+		t = w.continuation
+	}
 	var b strings.Builder
-	if err := w.prompt.Execute(&b, struct {
-		Issue        tracker.Issue
-		Continuation bool
-	}{issue, continuation}); err != nil {
-		return "", fmt.Errorf("%s: prompt template: %w", w.Path, err)
+	if err := t.Execute(&b, struct{ Issue tracker.Issue }{issue}); err != nil {
+		return "", fmt.Errorf("%s: %s: %w", w.Name, t.Name(), err)
 	}
 	return b.String(), nil
 }
 
-// LoadDir は dir の *.md をすべて名前順に読む。読めないファイルがあっても残りは返し、
-// それぞれのエラーをまとめて返す（1 つの Workflow の誤りで、ほかを止めないため）。
-func LoadDir(dir string) ([]*Workflow, error) {
-	paths, err := filepath.Glob(filepath.Join(dir, "*.md"))
-	if err != nil {
-		return nil, err
-	}
-	var ws []*Workflow
-	var errs []error
-	for _, p := range paths {
-		w, err := Load(p)
-		if err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		ws = append(ws, w)
-	}
-	return ws, errors.Join(errs...)
-}
-
-// Settings はユーザー単位の設定（設定のディレクトリの config.yaml）。
+// Settings はユーザー単位の設定（config.yaml の workflows 以外）。
 type Settings struct {
 	Interval time.Duration // tick の間隔
 	// この利用率（%）以上なら、新しい Dispatch を見送る
@@ -163,22 +187,9 @@ type Settings struct {
 // LoadSettings は設定を読む。ファイルがなければ既定値を返す。
 func LoadSettings(path string) (Settings, error) {
 	s := Settings{Interval: 5 * time.Minute, MaxSessionPercent: 80, MaxWeeklyPercent: 90}
-	src, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return s, nil
-	}
+	raw, err := read(path)
 	if err != nil {
 		return s, err
-	}
-	var raw struct {
-		Interval          string   `yaml:"interval"`
-		MaxSessionPercent *float64 `yaml:"max_session_percent"`
-		MaxWeeklyPercent  *float64 `yaml:"max_weekly_percent"`
-	}
-	dec := yaml.NewDecoder(bytes.NewReader(src))
-	dec.KnownFields(true)
-	if err := dec.Decode(&raw); err != nil && !errors.Is(err, io.EOF) {
-		return s, fmt.Errorf("%s: %w", path, err)
 	}
 	if raw.Interval != "" {
 		if s.Interval, err = time.ParseDuration(raw.Interval); err != nil {
