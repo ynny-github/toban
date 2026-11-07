@@ -12,3 +12,4 @@ Issue の進み具合は GitHub Project の State だけで表し、オーケス
 
 - State を移したあと起動前にオーケストレータが落ちると、worker のいない Issue が Working State に残る。人が気づいて State を戻す必要がある。
 - 同時実行数は Working State にある Issue の数で数えるので、人が worker と話している間やエージェントが State を移し忘れている間も 1 件と数える。
+- State の真実は Project にあり、ローカルの `state.json`（state ディレクトリに置く）はヒントに限る。継続や起動し直しの回数、最後に送った時刻を tick をまたいで覚えるだけで、消えても余分に送るだけで済む。壊れていて読めないときは、回数の上限が効かなくならないよう tick を失敗にする。

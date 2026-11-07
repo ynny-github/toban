@@ -1,4 +1,4 @@
-// Package state は toban が実行中に書くファイル（ロック、PID、ログ）を置く state ディレクトリを決める。
+// Package state は toban が実行中に書くファイル（ロック、PID、ログ、tick をまたぐヒントの state.json）を置く state ディレクトリを扱う。
 package state
 
 import (
