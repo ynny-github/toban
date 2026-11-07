@@ -249,6 +249,33 @@ func (t *Tracker) setState(ctx context.Context, issue tracker.Issue, state strin
 	return nil
 }
 
+func (t *Tracker) CheckFile(ctx context.Context, issue tracker.Issue, path string) error {
+	endpoint := "repos/" + issue.Repo + "/contents/" + path // ref を省くとデフォルトブランチ
+	stdout, runErr := t.run(ctx, "api", endpoint)
+	var resp struct {
+		Type    string `json:"type"`
+		Status  string `json:"status"` // エラーの応答にだけある
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(stdout, &resp); err != nil { // ディレクトリは配列で返る
+		if runErr != nil {
+			return fmt.Errorf("gh api %s: %w", endpoint, runErr)
+		}
+		return fmt.Errorf("github tracker: %s/%s is not a file", issue.Repo, path)
+	}
+	switch {
+	case resp.Status == "404":
+		return fmt.Errorf("github tracker: %s has no %s on its default branch", issue.Repo, path)
+	case resp.Status != "":
+		return fmt.Errorf("gh api %s: %s (HTTP %s)", endpoint, resp.Message, resp.Status)
+	case runErr != nil:
+		return fmt.Errorf("gh api %s: %w", endpoint, runErr)
+	case resp.Type != "file":
+		return fmt.Errorf("github tracker: %s/%s is not a file", issue.Repo, path)
+	}
+	return nil
+}
+
 func (t *Tracker) Preamble(issue tracker.Issue) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "この Issue（%s）の状態は、GitHub Project（%s）のフィールド「%s」で管理されている。", issue.URL, t.cfg.Project, t.cfg.StateField)

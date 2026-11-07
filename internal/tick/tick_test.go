@@ -17,6 +17,7 @@ type fakeTracker struct {
 	poll     tracker.Poll
 	pollErr  error
 	moveErr  error
+	missing  map[int]bool // WORKFLOW.md がない Issue
 	moved    []int
 	restored []int
 }
@@ -31,6 +32,12 @@ func (f *fakeTracker) MoveToWorking(_ context.Context, i tracker.Issue) error {
 }
 func (f *fakeTracker) Restore(_ context.Context, i tracker.Issue) error {
 	f.restored = append(f.restored, i.Number)
+	return nil
+}
+func (f *fakeTracker) CheckFile(_ context.Context, i tracker.Issue, path string) error {
+	if f.missing[i.Number] {
+		return fmt.Errorf("%s has no %s", i.Repo, path)
+	}
 	return nil
 }
 func (f *fakeTracker) Preamble(i tracker.Issue) string { return "PREAMBLE " + i.URL }
@@ -112,5 +119,36 @@ func TestRunKeepsGoingAfterAWorkflowFails(t *testing.T) {
 	}
 	if !slices.Equal(ok.moved, []int{1}) || len(ex.reqs) != 1 {
 		t.Errorf("the second Workflow was not processed: moved = %v, requests = %d", ok.moved, len(ex.reqs))
+	}
+}
+
+func TestRunSkipsIssuesWithoutWorkflowFileAndTakesTheNext(t *testing.T) {
+	tr := &fakeTracker{
+		poll:    tracker.Poll{Candidates: []tracker.Issue{issue(1), issue(2), issue(3)}},
+		missing: map[int]bool{1: true},
+	}
+	ex := &fakeExecutor{}
+
+	err := Run(context.Background(), quiet, []Target{{Name: "w", Tracker: tr, Executor: ex, MaxConcurrent: 1, Render: render}})
+
+	if err == nil {
+		t.Error("Run hid the Issue without WORKFLOW.md")
+	}
+	if !slices.Equal(tr.moved, []int{2}) || len(tr.restored) != 0 || len(ex.reqs) != 1 {
+		t.Errorf("moved = %v, restored = %v, requests = %d, want only #2 dispatched", tr.moved, tr.restored, len(ex.reqs))
+	}
+}
+
+func TestRunStopsAfterALaunchFails(t *testing.T) {
+	tr := &fakeTracker{poll: tracker.Poll{Candidates: []tracker.Issue{issue(1), issue(2)}}}
+	ex := &fakeExecutor{err: errors.New("orca is down")}
+
+	err := Run(context.Background(), quiet, []Target{{Name: "w", Tracker: tr, Executor: ex, MaxConcurrent: 2, Render: render}})
+
+	if err == nil {
+		t.Error("Run succeeded although the launch failed")
+	}
+	if !slices.Equal(tr.moved, []int{1}) {
+		t.Errorf("moved = %v, want [1]: a failing Executor should not be tried on every Candidate", tr.moved)
 	}
 }

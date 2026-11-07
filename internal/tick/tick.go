@@ -12,6 +12,9 @@ import (
 	"github.com/ynny-github/toban/internal/tracker"
 )
 
+// workflowFile は worker が従う手順書で、Dispatch の前に対象リポジトリにあることを確かめる（ADR 0005）。
+const workflowFile = "WORKFLOW.md"
+
 // Target は 1 つの Workflow を処理するのに要るもの。
 type Target struct {
 	Name          string
@@ -37,27 +40,43 @@ func runOne(ctx context.Context, log *slog.Logger, t Target) error {
 	if err != nil {
 		return err
 	}
-	free := t.MaxConcurrent - poll.Working
-	candidates := poll.Candidates[:max(0, min(free, len(poll.Candidates)))]
-	log.Info("polled", "candidates", len(poll.Candidates), "working", poll.Working, "dispatching", len(candidates))
+	free := max(0, t.MaxConcurrent-poll.Working)
+	log.Info("polled", "candidates", len(poll.Candidates), "working", poll.Working, "free", free)
 
+	// 起動前に弾いた Issue は枠を使わず、次の Candidate に進む。State を移したあとの失敗は
+	// Tracker や Executor の不調の可能性が高いので、この周はそこで止める。
 	var errs []error
-	for _, issue := range candidates {
-		if err := dispatch(ctx, log.With("issue", fmt.Sprintf("%s#%d", issue.Repo, issue.Number)), t, issue); err != nil {
-			errs = append(errs, fmt.Errorf("%s#%d: %w", issue.Repo, issue.Number, err))
+	dispatched := 0
+	for _, issue := range poll.Candidates {
+		if dispatched >= free {
+			break
 		}
+		stop, err := dispatch(ctx, log.With("issue", fmt.Sprintf("%s#%d", issue.Repo, issue.Number)), t, issue)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s#%d: %w", issue.Repo, issue.Number, err))
+			if stop {
+				break
+			}
+			continue
+		}
+		dispatched++
 	}
 	return errors.Join(errs...)
 }
 
-// dispatch は State を Working State に移してから worker を起動する。起動に失敗したら State を戻す（ADR 0001）。
-func dispatch(ctx context.Context, log *slog.Logger, t Target, issue tracker.Issue) error {
+// dispatch は手順書の有無を確かめ、State を Working State に移してから worker を起動する。
+// 起動に失敗したら State を戻す（ADR 0001）。stop は State を移したあとの失敗かどうか。
+func dispatch(ctx context.Context, log *slog.Logger, t Target, issue tracker.Issue) (stop bool, err error) {
+	if err := t.Tracker.CheckFile(ctx, issue, workflowFile); err != nil {
+		log.Warn("skipped; State not moved", "error", err)
+		return false, err
+	}
 	body, err := t.Render(issue)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err := t.Tracker.MoveToWorking(ctx, issue); err != nil {
-		return err
+		return true, err
 	}
 	res, err := t.Executor.Dispatch(ctx, executor.Request{
 		Issue:  executor.Issue{Repo: issue.Repo, Number: issue.Number},
@@ -66,11 +85,11 @@ func dispatch(ctx context.Context, log *slog.Logger, t Target, issue tracker.Iss
 	if err != nil {
 		if rerr := t.Tracker.Restore(ctx, issue); rerr != nil {
 			log.Error("launch failed and the State could not be restored; move it back by hand", "error", err, "restore_error", rerr)
-			return errors.Join(err, rerr)
+			return true, errors.Join(err, rerr)
 		}
 		log.Warn("launch failed; State restored", "error", err)
-		return err
+		return true, err
 	}
 	log.Info("dispatched", "worktree", res.Worktree, "session", res.Session)
-	return nil
+	return false, nil
 }

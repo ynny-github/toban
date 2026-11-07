@@ -17,6 +17,6 @@ max_concurrent: 1            # Working State の Issue がこの数に達する�
 ---
 {{.Issue.URL}}（{{.Issue.Repo}}#{{.Issue.Number}} 「{{.Issue.Title}}」）に取り組む。
 
-このリポジトリのルートの WORKFLOW.md に沿って進める。WORKFLOW.md がなければ、作業を始めずに、Issue にその旨をコメントして止まる。
+このリポジトリのルートの WORKFLOW.md に沿って進める。
 
 {{.Issue.Body}}

@@ -192,3 +192,27 @@ func TestPreambleTellsHowToMoveTheState(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckFile(t *testing.T) {
+	for _, c := range []struct {
+		name, fixture string
+		want          string // エラーに含まれる語。空ならエラーにならない
+	}{
+		{"file", "contents-file.json", ""},
+		{"missing", "contents-404.json", "no WORKFLOW.md"},
+		{"forbidden", "contents-403.json", "HTTP 403"},
+		{"directory", "contents-dir.json", "not a file"},
+	} {
+		f := &fakeGh{t: t, responses: []string{c.fixture}}
+		tr, _ := New(project3, f.run)
+
+		err := tr.CheckFile(context.Background(), tracker.Issue{Repo: "ynny-github/toban"}, "WORKFLOW.md")
+
+		if (c.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), c.want)) {
+			t.Errorf("%s: err = %v, want one containing %q", c.name, err, c.want)
+		}
+		if args := strings.Join(f.calls[0], " "); args != "api repos/ynny-github/toban/contents/WORKFLOW.md" {
+			t.Errorf("%s: gh args = %q", c.name, args)
+		}
+	}
+}

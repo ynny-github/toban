@@ -27,6 +27,8 @@ type Tracker interface {
 	MoveToWorking(ctx context.Context, issue Issue) error
 	// Restore は Issue を Poll で取得したときの State に戻す。
 	Restore(ctx context.Context, issue Issue) error
+	// CheckFile は Issue のリポジトリのデフォルトブランチに path のファイルがあるか確かめる。なければエラーを返す。
+	CheckFile(ctx context.Context, issue Issue, path string) error
 	// Preamble は worker に渡すプロンプトの前置き（State の移し方など）を返す。
 	Preamble(issue Issue) string
 }
