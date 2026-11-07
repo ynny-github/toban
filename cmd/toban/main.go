@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 	"time"
 
 	"github.com/ynny-github/toban/internal/executor/orca"
@@ -20,6 +21,17 @@ import (
 	"github.com/ynny-github/toban/internal/workflow"
 )
 
+// version はリリースのビルドで goreleaser が -ldflags で埋める。
+var version = "dev"
+
+// versionString は、ldflags がなければ go install が埋めたモジュールのバージョンを返す。
+func versionString() string {
+	if bi, ok := debug.ReadBuildInfo(); ok && version == "dev" && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		return bi.Main.Version
+	}
+	return version
+}
+
 const usage = `usage: toban [-config <dir>] <command>
 
 設定のディレクトリ（config.yaml と workflows/ を置く）は必須。-config か環境変数 TOBAN_CONFIG で指定する。
@@ -28,13 +40,19 @@ commands:
   init <dir>          <dir>（必須）に雛形（config.yaml と workflows/example.md.sample）を作る
   tick                すべての Workflow を 1 回ずつ処理し、Candidate を Dispatch する
   schedule install    tick を config.yaml の間隔で起動するジョブを launchd に登録する（やり直すと置き換わる）
+  version             バージョンを表示する（-version でも同じ。設定のディレクトリは不要）
 `
 
 func main() {
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	flag.Usage = func() { fmt.Fprint(os.Stderr, usage); flag.PrintDefaults() }
 	configDir := flag.String("config", os.Getenv("TOBAN_CONFIG"), "設定のディレクトリ（既定は環境変数 TOBAN_CONFIG）")
+	showVersion := flag.Bool("version", false, "バージョンを表示して終了する")
 	flag.Parse()
+	if *showVersion || flag.Arg(0) == "version" {
+		fmt.Println("toban", versionString())
+		return
+	}
 	// init のディレクトリは引数で必ず指定する。ほかのコマンドは -config か TOBAN_CONFIG
 	if flag.Arg(0) == "init" {
 		if flag.NArg() != 2 {
