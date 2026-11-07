@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"text/template"
@@ -56,20 +55,29 @@ var plist = template.Must(template.New("plist").Funcs(template.FuncMap{"x": esca
 </plist>
 `))
 
-// Plist は launchd のユーザー単位のジョブの定義を返す。
-// launchd はログインシェルの PATH を引き継がないので、Tools のディレクトリから PATH を作って渡す。
-func Plist(j Job) []byte {
+// toolPath は Tools のディレクトリに /usr/bin と /bin を足した PATH を返す。
+func toolPath(tools []string) string {
 	var dirs []string
-	for _, t := range j.Tools {
+	for _, t := range tools {
 		if d := filepath.Dir(t); !slices.Contains(dirs, d) {
 			dirs = append(dirs, d)
 		}
 	}
-	dirs = append(dirs, "/usr/bin", "/bin")
+	for _, d := range []string{"/usr/bin", "/bin"} {
+		if !slices.Contains(dirs, d) {
+			dirs = append(dirs, d)
+		}
+	}
+	return strings.Join(dirs, ":")
+}
+
+// Plist は launchd のユーザー単位のジョブの定義を返す。
+// launchd はログインシェルの PATH を引き継がないので、Tools のディレクトリから PATH を作って渡す。
+func Plist(j Job) []byte {
 	var b bytes.Buffer
 	plist.Execute(&b, map[string]any{
 		"Label": Label, "Toban": j.Toban, "ConfigDir": j.ConfigDir, "Log": j.Log,
-		"Path": strings.Join(dirs, ":"), "Seconds": int(j.Interval.Seconds()),
+		"Path": toolPath(j.Tools), "Seconds": int(j.Interval.Seconds()),
 	})
 	return b.Bytes()
 }
@@ -82,9 +90,6 @@ func escape(s string) string {
 
 // Install は plist を plistPath に書き、launchd のジョブを入れ替える。何度実行しても 1 つだけになる。
 func Install(j Job, plistPath string) error {
-	if runtime.GOOS != "darwin" {
-		return fmt.Errorf("schedule install supports only macOS (launchd) for now")
-	}
 	if err := os.MkdirAll(filepath.Dir(plistPath), 0o755); err != nil {
 		return err
 	}

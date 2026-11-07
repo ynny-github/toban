@@ -32,3 +32,30 @@ func TestPlistEscapesPaths(t *testing.T) {
 		t.Errorf("path is not escaped:\n%s", got)
 	}
 }
+
+func TestSystemdUnitsRunTickAtTheInterval(t *testing.T) {
+	svc, tmr := SystemdUnits(Job{
+		Toban:     "/home/dev/.local/bin/toban",
+		ConfigDir: "/home/dev/toban-config",
+		Tools:     []string{"/usr/local/bin/gh", "/home/dev/.local/bin/orca", "/usr/bin/git"},
+		Interval:  2 * time.Minute,
+	})
+
+	for name, got := range map[string][]byte{"toban.service": svc, "toban.timer": tmr} {
+		want, err := os.ReadFile("testdata/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != string(want) {
+			t.Errorf("%s:\n%s\nwant:\n%s", name, got, want)
+		}
+	}
+}
+
+// systemd は " と \ と % を特別扱いするので、パスに含まれていても 1 語のまま渡せなければならない。
+func TestSystemdUnitsQuotePaths(t *testing.T) {
+	svc, _ := SystemdUnits(Job{Toban: `/a b/"t"\x%h`, ConfigDir: "/c", Interval: time.Minute})
+	if !strings.Contains(string(svc), `ExecStart="/a b/\"t\"\\x%%h" "-config" "/c" "tick"`) {
+		t.Errorf("path is not quoted:\n%s", svc)
+	}
+}

@@ -1,0 +1,9 @@
+[Unit]
+Description=Run toban tick every 120 seconds
+
+[Timer]
+OnActiveSec=0
+OnUnitInactiveSec=120s
+
+[Install]
+WantedBy=timers.target

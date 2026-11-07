@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"time"
 
@@ -39,7 +40,7 @@ const usage = `usage: toban [-config <dir>] <command>
 commands:
   init <dir>          <dir>（必須）に雛形（config.yaml）を作る
   tick                すべての Workflow を 1 回ずつ処理し、Candidate を Dispatch する
-  schedule install    tick を config.yaml の間隔で起動するジョブを launchd に登録する（やり直すと置き換わる）
+  schedule install    tick を config.yaml の間隔で起動するジョブを登録する（macOS は launchd、Linux は systemd のユーザー timer）（やり直すと置き換わる）
   version             バージョンを表示する（-version でも同じ。設定のディレクトリは不要）
 `
 
@@ -177,7 +178,7 @@ func installSchedule(log *slog.Logger, configDir string) error {
 	if err != nil {
 		return err
 	}
-	// launchd は PATH を引き継がないので、tick が使うコマンドの場所をここで決めておく
+	// launchd と systemd は PATH を引き継がないので、tick が使うコマンドの場所をここで決めておく
 	var tools []string
 	for _, name := range []string{"gh", "orca", "git"} {
 		p, err := exec.LookPath(name)
@@ -193,9 +194,23 @@ func installSchedule(log *slog.Logger, configDir string) error {
 	if err != nil {
 		return err
 	}
-	job := schedule.Job{
-		Toban: self, ConfigDir: configDir, Tools: tools, Interval: settings.Interval,
-		Log: filepath.Join(home, "Library", "Logs", "toban", "tick.log"),
+	job := schedule.Job{Toban: self, ConfigDir: configDir, Tools: tools, Interval: settings.Interval}
+	switch runtime.GOOS {
+	case "linux":
+		configHome := os.Getenv("XDG_CONFIG_HOME")
+		if configHome == "" {
+			configHome = filepath.Join(home, ".config")
+		}
+		unitDir := filepath.Join(configHome, "systemd", "user")
+		if err := schedule.InstallSystemd(job, unitDir); err != nil {
+			return err
+		}
+		log.Info("installed", "units", unitDir, "interval", settings.Interval, "log", "journalctl --user -u "+schedule.Unit)
+		return nil
+	case "darwin":
+		job.Log = filepath.Join(home, "Library", "Logs", "toban", "tick.log")
+	default:
+		return fmt.Errorf("schedule install supports only macOS (launchd) and Linux (systemd), not %s", runtime.GOOS)
 	}
 	plistPath := filepath.Join(home, "Library", "LaunchAgents", schedule.Label+".plist")
 	if err := schedule.Install(job, plistPath); err != nil {
