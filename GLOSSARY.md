@@ -51,3 +51,7 @@ _Avoid_: Attempt、Run、起動、割り当て
 **Workflow**:
 Tracker 上の 1 つの管理単位（GitHub なら Project）について、Candidate の条件、Executor の設定、worker に渡すプロンプトのテンプレートをまとめた定義。1 つの Workflow が複数のリポジトリの Issue を扱える。
 _Avoid_: 設定ファイル、プロンプト、リポジトリ設定
+
+**WORKFLOW.md**:
+対象リポジトリのルートにある、worker 向けの作業手順書。toban は読まず、Dispatch の前にデフォルトブランチにあることだけを確かめる。
+_Avoid_: Workflow（Project 単位の定義とは別物）、プロンプト
