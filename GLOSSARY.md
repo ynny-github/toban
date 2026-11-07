@@ -49,7 +49,7 @@ Candidate の State を Working State に移し、その Issue のための work
 _Avoid_: Attempt、Run、起動、割り当て
 
 **Workflow**:
-Tracker 上の 1 つの管理単位（GitHub なら Project）について、Candidate の条件、Executor の設定、worker に渡すプロンプトのテンプレートをまとめた定義で、設定のディレクトリの `config.yaml` の `workflows:` に書く。1 つの Workflow が複数のリポジトリの Issue を扱える。
+Tracker 上の 1 つの管理単位（GitHub なら Project）について、Candidate の条件、worker に渡すプロンプトのテンプレートなどをまとめた定義（Executor の設定は全 Workflow で共通）で、設定のディレクトリの `config.yaml` の `trackers:`（1 件が 1 つの Workflow）に書く。1 つの Workflow が複数のリポジトリの Issue を扱える。
 _Avoid_: 設定ファイル、プロンプト、リポジトリ設定
 
 **WORKFLOW.md**:

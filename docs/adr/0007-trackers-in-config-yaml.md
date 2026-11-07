@@ -1,6 +1,6 @@
-# Workflow は設定のディレクトリの `config.yaml` に書き、Markdown のファイルは使わない
+# Workflow は設定のディレクトリの `config.yaml` の `trackers:` に書き、Markdown のファイルは使わない
 
-Workflow は設定のディレクトリの `workflows/*.md`（YAML の front matter とプロンプトの本文）に置いていたが、`config.yaml` の `workflows:` に書く形に変える。ユーザー単位の設定（`interval`、使用量の上限）と、Project ごとの Workflow が 1 つのファイルに入る。プロンプトは `prompt` と `continuation_prompt` の 2 つの文字列（Go の `text/template`）に分け、`Continuation` の出し分け（`{{if}}`）をやめる。
+Workflow は設定のディレクトリの `workflows/*.md`（YAML の front matter とプロンプトの本文）に置いていたが、`config.yaml` の `trackers:` に書く形に変える。ユーザー単位の設定（`interval`、使用量の上限）、Executor（すべての Tracker に共通で、`executor:` を root に置く。省略すると Orca の Claude）、Tracker の管理単位ごとの定義（`trackers:` の 1 件。`name`、`kind` と Tracker の設定、`max_concurrent`、プロンプト）が 1 つのファイルに入る。プロンプトは `prompt` と `continuation_prompt` の 2 つの文字列（Go の `text/template`）に分け、`Continuation` の出し分け（`{{if}}`）をやめる。
 
 ## 理由
 
