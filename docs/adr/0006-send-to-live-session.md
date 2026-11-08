@@ -46,3 +46,20 @@ Dispatch は、worker を 1 回起動するだけでなく、すでに生きて�
 
 - バックグラウンドの処理を待っているだけのセッションも、`stall_after` を超えると継続が届く。積まれるだけなので害は小さいが、送った回数が上限に近づく。
 - Claude が終了してシェルだけが残ると、`worktree ps` は `working` のままになり、継続の文章がシェルに入力される。起動し直しは #15 で扱う。
+
+## 落ちたセッションの起動し直し（#15 で追記）
+
+Working State の Issue に生きたエージェントがいない（worker が落ちた）ときは、継続の代わりに、最初のプロンプト（Preamble と本文）で起動し直す（Symphony の「異常終了のあとの、バックオフ付きリトライ」に当たる）。State は Working のままにし、Dispatch の枠も使わない。
+
+- 「落ちた」は、Issue の worktree があり、設定した `agent` の種類の生きたセッションが 0 個のこと。生きたセッションの条件に、`hasLivePty` に加えて `programStatus` があることを足した。Orca 1.4.243 では、端末を閉じると `agents` が空になり、Claude を `/exit` で終えてシェルだけが残ると `state=done`、`hasLivePty=true` のまま `programStatus` が消える。`programStatus` がない `working`（再起動前の古いセッションで見た）も落ちたとみなす。
+- この条件は Dispatch にも効く。Ready に戻された Issue の worktree にシェルだけが残っていれば、そこへ継続を送らず、新しく起動する。
+- 起動し直す経路は Dispatch と同じ `Executor.Dispatch`（worktree があり、生きたセッションがなければ `agent launch`）。
+- 待ち時間は `relaunch_after`（既定 10 分）で、起動し直すたびに倍にする（10 分、20 分、40 分）。worktree で最後に動いた時刻（`max(agents[].updatedAt, lastOutputAt)`）と、`state.json` の `last_sent_at` の遅いほうから数える。どちらも分からなければ、すぐ起動し直す。
+- 回数の上限は `max_relaunches`（既定 3。`0` で起動し直さない）。起動に成功したら `state.json` の `relaunches` を 1 増やし、`last_sent_at` を記録する。上限に達したら、ログに残すだけにする。起動に失敗しても回数は増やさず、tick の失敗にもせず、次の周でやり直す。
+- 回数は継続（`continuations`）とは別に数え、Working State を離れたら継続と一緒に消える。使用量の上限を超えていれば、Dispatch や継続と一緒に見送る。
+
+### Consequences
+
+- 上の「Claude が終了してシェルだけが残ると、継続の文章がシェルに入力される」は起きなくなる。シェルは残ったまま、別の端末で claude を起動する。
+- `programStatus` を目印にするのは 1 回の観測にもとづく。Orca がこれを出さない版では、すべてのセッションが落ちたとみなされ、生きたセッションがあっても起動し直してしまう。
+- Claude をシグナルで強制終了したときの見え方は確かめていない（`/exit` と同じになると想定している）。
