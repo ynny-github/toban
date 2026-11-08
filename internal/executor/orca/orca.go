@@ -4,9 +4,11 @@ package orca
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strconv"
+	"time"
 
 	"github.com/ynny-github/toban/internal/executor"
 )
@@ -35,7 +37,11 @@ func New(cfg Config, run Runner) *Executor { return &Executor{cfg: cfg, run: run
 
 // plan は Issue の作業場所と、続きの指示を送る先のセッションを決める。
 // path が空なら worktree を作り、pane が空なら新しく起動し、pane があればそのセッションへ送る（ADR 0006）。
-type plan struct{ path, pane string }
+// since は pane のセッションが done に入った時刻（Unix ミリ秒）。
+type plan struct {
+	path, pane string
+	since      int64
+}
 
 func (e *Executor) plan(ctx context.Context, issue executor.Issue) (plan, error) {
 	path, err := e.findWorktree(ctx, issue)
@@ -52,7 +58,7 @@ func (e *Executor) plan(ctx context.Context, issue executor.Issue) (plan, error)
 	case 1:
 		switch live[0].State {
 		case "done":
-			return plan{path: path, pane: live[0].PaneKey}, nil
+			return plan{path: path, pane: live[0].PaneKey, since: live[0].StateStartedAt}, nil
 		case "working":
 			return plan{}, executor.ErrBusy
 		}
@@ -62,10 +68,11 @@ func (e *Executor) plan(ctx context.Context, issue executor.Issue) (plan, error)
 }
 
 type agentInfo struct {
-	PaneKey    string `json:"paneKey"` // "<tabId>:<leafId>"
-	State      string `json:"state"`
-	AgentType  string `json:"agentType"`
-	HasLivePty bool   `json:"hasLivePty"`
+	PaneKey        string `json:"paneKey"` // "<tabId>:<leafId>"
+	State          string `json:"state"`
+	StateStartedAt int64  `json:"stateStartedAt"` // Unix ミリ秒
+	AgentType      string `json:"agentType"`
+	HasLivePty     bool   `json:"hasLivePty"`
 }
 
 // liveAgents は path の worktree で生きている、設定した種類のエージェントのセッションを返す。
@@ -100,6 +107,32 @@ func (e *Executor) liveAgents(ctx context.Context, path string) ([]agentInfo, er
 func (e *Executor) Check(ctx context.Context, issue executor.Issue) error {
 	_, err := e.plan(ctx, issue)
 	return err
+}
+
+func (e *Executor) Session(ctx context.Context, issue executor.Issue) (executor.Session, error) {
+	p, err := e.plan(ctx, issue)
+	if errors.Is(err, executor.ErrBusy) {
+		return executor.Session{State: "working"}, nil
+	}
+	if err != nil || p.pane == "" {
+		return executor.Session{}, err
+	}
+	if p.since <= 0 { // 時刻が分からないまま、すぐ送ってしまわないように
+		return executor.Session{}, fmt.Errorf("%s: orca worktree ps did not report when the session became done", p.path)
+	}
+	return executor.Session{State: "done", Since: time.UnixMilli(p.since)}, nil
+}
+
+// Continue は送る直前にもう一度セッションを確かめ、done でなければ送らない。
+func (e *Executor) Continue(ctx context.Context, issue executor.Issue, prompt string) (executor.Result, error) {
+	p, err := e.plan(ctx, issue)
+	if err != nil {
+		return executor.Result{}, err
+	}
+	if p.pane == "" {
+		return executor.Result{}, fmt.Errorf("%s#%d has no live session to continue", issue.Repo, issue.Number)
+	}
+	return e.send(ctx, p, prompt)
 }
 
 func (e *Executor) Dispatch(ctx context.Context, req executor.Request) (executor.Result, error) {
@@ -244,7 +277,11 @@ func (e *Executor) call(ctx context.Context, out any, args ...string) error {
 		return fmt.Errorf("orca %s %s: unreadable output: %w", args[0], args[1], err)
 	}
 	if !env.OK {
-		return fmt.Errorf("orca %s %s: %s: %s", args[0], args[1], env.Error.Code, env.Error.Message)
+		err := fmt.Errorf("orca %s %s: %s: %s", args[0], args[1], env.Error.Code, env.Error.Message)
+		if env.Error.Code == "agent_prompt_blocked" {
+			return fmt.Errorf("%w: %w", executor.ErrBlocked, err)
+		}
+		return err
 	}
 	return json.Unmarshal(env.Result, out)
 }

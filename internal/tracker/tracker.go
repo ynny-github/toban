@@ -18,7 +18,9 @@ type Issue struct {
 // Poll は 1 回の問い合わせで分かった、Dispatch の判断に要るもの。
 type Poll struct {
 	Candidates []Issue `json:"candidates"`
-	Working    int     `json:"working"` // Working State にある Issue の数
+	Working    int     `json:"working"` // Working State にある Issue の数（同時実行数として数える）
+	// WorkingIssues は Working State にある Issue のうち、State のほかは Candidate の条件を満たすもの。継続を送る対象になる。
+	WorkingIssues []Issue `json:"working_issues"`
 }
 
 type Tracker interface {

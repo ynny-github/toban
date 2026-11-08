@@ -5,6 +5,7 @@ package executor
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 // Issue は worker に渡す Issue の識別子。
@@ -23,6 +24,15 @@ type Request struct {
 // ErrBusy は、Issue のセッションがまだ作業中なので、今は Dispatch しないことを表す。失敗ではない。
 var ErrBusy = errors.New("the worker is still working")
 
+// ErrBlocked は、セッションが許可メニューを出していて（承認待ち）、送った指示を受け付けなかったことを表す。
+var ErrBlocked = errors.New("the agent is waiting for approval")
+
+// Session は Issue の作業場所で生きているセッションの様子。
+type Session struct {
+	State string    `json:"state"` // "done"（返答を終えて止まっている）、"working"、""（生きたセッションがない）
+	Since time.Time `json:"since"` // State に入った時刻。State が "done" のときだけ入る
+}
+
 // Result は起動した worker の居場所。ログに残すためだけに使う。
 type Result struct {
 	Worktree string `json:"worktree"` // 作業場所のパス
@@ -33,4 +43,8 @@ type Executor interface {
 	// Check は State を動かす前に呼ぶ。Dispatch できない状態ならエラーを返し、作業中なら ErrBusy を返す。
 	Check(ctx context.Context, issue Issue) error
 	Dispatch(ctx context.Context, req Request) (Result, error)
+	// Session は Issue のセッションの様子を返す。どれに送るか決められないときはエラーを返す。
+	Session(ctx context.Context, issue Issue) (Session, error)
+	// Continue は "done" のセッションに prompt だけを送る。新しく起動はしない。
+	Continue(ctx context.Context, issue Issue, prompt string) (Result, error)
 }

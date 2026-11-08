@@ -38,11 +38,11 @@ const usage = `usage: toban [-config <dir>] [-state <dir>] <command>
 
 設定のディレクトリ（config.yaml を置く。Tracker ごとの Workflow も config.yaml の trackers に書く）は必須。-config か環境変数 TOBAN_CONFIG で指定する。
 
-state ディレクトリ（ロック、PID、ログを置く）の既定は $XDG_STATE_HOME/toban（なければ ~/.local/state/toban）。-state か環境変数 TOBAN_STATE で変える。
+state ディレクトリ（ロック、PID、ログ、継続の回数を覚える state.json を置く）の既定は $XDG_STATE_HOME/toban（なければ ~/.local/state/toban）。-state か環境変数 TOBAN_STATE で変える。
 
 commands:
   init <dir>          <dir>（必須）に雛形（config.yaml）を作る
-  tick                すべての Workflow を 1 回ずつ処理し、Candidate を Dispatch する
+  tick                すべての Workflow を 1 回ずつ処理し、止まった Working の Issue に継続を送り、Candidate を Dispatch する
   run                 前面で tick を config.yaml の間隔で繰り返す（コンテナの起動コマンド向け）
   start               run を背景に切り離して起動する（ログは state ディレクトリの toban.log。回転する）
   stop                背景の run を止める（実行中の tick が終わってから止まる）
@@ -77,7 +77,10 @@ func main() {
 	var err error
 	switch flag.Arg(0) {
 	case "tick":
-		err = runTick(context.Background(), log, *configDir)
+		var dir string
+		if dir, err = state.Dir(*stateOverride); err == nil {
+			err = runTick(context.Background(), log, *configDir, dir)
+		}
 	case "init":
 		if err = scaffold.Init(*configDir); err == nil {
 			log.Info("created", "dir", *configDir, "next", "uncomment the trackers example in config.yaml and edit it, then run `toban start`")
@@ -97,7 +100,7 @@ func main() {
 	}
 }
 
-func runTick(ctx context.Context, log *slog.Logger, configDir string) error {
+func runTick(ctx context.Context, log *slog.Logger, configDir, stateDir string) error {
 	cache, err := os.UserCacheDir()
 	if err != nil {
 		return err
@@ -144,7 +147,15 @@ func runTick(ctx context.Context, log *slog.Logger, configDir string) error {
 		}
 		targets = append(targets, t)
 	}
-	if err := tick.Run(ctx, log, targets); err != nil {
+	hints, err := state.Load(stateDir)
+	if err != nil {
+		return errors.Join(append(errs, err)...)
+	}
+	c := tick.Continuation{After: settings.ContinueAfter, Max: settings.MaxContinuations, Now: time.Now(), Hints: hints, Partial: len(errs) > 0}
+	if err := tick.Run(ctx, log, targets, c); err != nil {
+		errs = append(errs, err)
+	}
+	if err := hints.Save(stateDir); err != nil {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
@@ -186,7 +197,7 @@ func runDaemonCommand(log *slog.Logger, command, configDir, stateDir string) err
 	p := daemon.PathsIn(stateDir)
 	switch command {
 	case "run":
-		return runLoop(log, configDir, p)
+		return runLoop(log, configDir, stateDir, p)
 	case "start":
 		if _, err := validate(configDir); err != nil {
 			return err
@@ -232,7 +243,7 @@ func runDaemonCommand(log *slog.Logger, command, configDir, stateDir string) err
 
 // runLoop は tick を config.yaml の間隔で繰り返す。設定は周ごとに読み直すので、間隔を変えても再起動は要らない。
 // 始める前の設定の誤りは終了にするが、始めたあとの tick の失敗はログに出して次の周に進む。
-func runLoop(log *slog.Logger, configDir string, p daemon.Paths) error {
+func runLoop(log *slog.Logger, configDir, stateDir string, p daemon.Paths) error {
 	settings, err := validate(configDir)
 	if err != nil {
 		return err
@@ -260,7 +271,7 @@ func runLoop(log *slog.Logger, configDir string, p daemon.Paths) error {
 		return interval
 	}, func() {
 		// ctx は渡さない。止める合図が来ても、Dispatch の途中で止めず、この tick を終える
-		if err := runTick(context.Background(), log, configDir); err != nil {
+		if err := runTick(context.Background(), log, configDir, stateDir); err != nil {
 			log.Error("tick failed", "error", err)
 		}
 	})
