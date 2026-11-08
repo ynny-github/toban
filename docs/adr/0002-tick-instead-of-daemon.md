@@ -2,6 +2,8 @@
 
 > 定期起動の方法は ADR 0008 で置き換わった（`schedule install` は削除し、`toban run` と `toban start` にした）。以下は当時の判断の記録。
 
+> closed になった Issue の worktree の片付けは、例外として tick が受け持つ（ADR 0009）。
+
 オーケストレータの役割は Issue を拾って worker を起動するところまでで、起動後の worker を監督しない。待ち受ける受信箱がなく、必要な状態はすべて Tracker の State にあるので、1 周ごとに Tracker を読み直して Dispatch する `toban tick` を定期起動すれば足りる。定期起動は `toban schedule install` が OS のスケジューラ（macOS は launchd のユーザー単位のジョブ、Linux は systemd のユーザー timer）に 1 つだけ登録し、tick はすべての Workflow を順に処理する。間隔はユーザー単位の設定に書き、変えたら `install` をやり直す。同時実行数の上限は Workflow ごとに持ち、全体の上限は持たない。周が重なったときに備えてロックファイルを使う。
 
 ## Considered Options

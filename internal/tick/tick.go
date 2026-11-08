@@ -1,4 +1,4 @@
-// Package tick は toban tick の 1 周ぶんの処理（Working State の Issue に継続を送り、Candidate を Dispatch する）を行う。
+// Package tick は toban tick の 1 周ぶんの処理（closed の Issue の作業場所を消し、Working State の Issue に継続を送り、Candidate を Dispatch する）を行う。
 package tick
 
 import (
@@ -24,6 +24,8 @@ type Target struct {
 	Executor      executor.Executor
 	MaxConcurrent int
 	Render        func(issue tracker.Issue, continuation bool) (string, error)
+	// CloseAfter は、Issue が closed になってから作業場所を消すまでの時間。0 なら消さない（ADR 0009）
+	CloseAfter time.Duration
 }
 
 // Continuation は、Working State の Issue のセッションが done のまま止まっているときや、working のまま動かないとき（停滞）、継続を送るための設定と記録。
@@ -35,6 +37,8 @@ type Continuation struct {
 	Hints      state.State // 送った回数。Run が書き換え、Working State を離れた Issue のエントリを消す
 	// Partial は、targets に入れられなかった Workflow があること。その Issue のエントリを消さないよう、片付けを見送る
 	Partial bool
+	// Over が空でなければ、使用量の上限を超えているか確かめられなかった理由。継続と Dispatch を見送る（作業場所の片付けはする）
+	Over string
 }
 
 // Run はすべての Target を順に処理する。1 つの Target で失敗しても残りは続け、失敗をまとめて返す。
@@ -42,6 +46,9 @@ func Run(ctx context.Context, log *slog.Logger, targets []Target, c Continuation
 	var errs []error
 	keep := map[string]bool{}
 	allPolled := !c.Partial
+	if c.Over != "" {
+		log.Info("Claude usage is over the limit or unknown; not continuing or dispatching", "reason", c.Over)
+	}
 	for _, t := range targets {
 		polled, err := runOne(ctx, log.With("workflow", t.Name), t, c, keep)
 		allPolled = allPolled && polled
@@ -65,11 +72,21 @@ func runOne(ctx context.Context, log *slog.Logger, t Target, c Continuation, kee
 	free := max(0, t.MaxConcurrent-poll.Working)
 	log.Info("polled", "candidates", len(poll.Candidates), "working", poll.Working, "free", free)
 
+	// 使用量を使わないので、使用量の上限の手前で行う
+	if t.CloseAfter > 0 {
+		removeClosed(ctx, log, t, c.Now, poll.Closed)
+	}
+
 	// 継続は Dispatch の枠を使わず、失敗しても tick の失敗にしない（ログに残して次の周でやり直す）
 	for _, issue := range poll.WorkingIssues {
 		key := fmt.Sprintf("%s#%d", issue.Repo, issue.Number)
 		keep[key] = true
-		continueOne(ctx, log.With("issue", key), t, c, key, issue)
+		if c.Over == "" {
+			continueOne(ctx, log.With("issue", key), t, c, key, issue)
+		}
+	}
+	if c.Over != "" {
+		return true, nil
 	}
 
 	// 起動前に弾いた Issue は枠を使わず、次の Candidate に進む。State を移したあとの失敗は
@@ -175,4 +192,22 @@ func continueOne(ctx context.Context, log *slog.Logger, t Target, c Continuation
 	hint.LastSentAt = c.Now
 	c.Hints[key] = hint
 	log.Info("continued", "continuations", hint.Continuations, "worktree", res.Worktree, "session", res.Session)
+}
+
+// removeClosed は、closed になってから t.CloseAfter たった Issue の作業場所を消す。
+// 消せなかったら（コミット前の変更があるなど）ログに残し、次の周でまた試す。tick の失敗にはしない。
+func removeClosed(ctx context.Context, log *slog.Logger, t Target, now time.Time, closed []tracker.Issue) {
+	var due []executor.Issue
+	for _, issue := range closed {
+		if !issue.ClosedAt.IsZero() && now.Sub(issue.ClosedAt) >= t.CloseAfter {
+			due = append(due, executor.Issue{Repo: issue.Repo, Number: issue.Number})
+		}
+	}
+	removed, err := t.Executor.Remove(ctx, due)
+	for _, path := range removed {
+		log.Info("removed the worktree of a closed issue", "worktree", path)
+	}
+	if err != nil {
+		log.Warn("could not remove the worktree of a closed issue; retrying next tick", "error", err)
+	}
 }

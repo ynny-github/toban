@@ -23,6 +23,7 @@ const itemsQuery = `query($login: String!, $number: Int!, $field: String!, $curs
               body
               url
               state
+              closedAt
               repository { nameWithOwner }
               labels(first: 100) { nodes { name } }
               assignees(first: 100) { nodes { login } }

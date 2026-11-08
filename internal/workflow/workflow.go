@@ -24,8 +24,10 @@ type Workflow struct {
 	Tracker       TrackerConfig
 	Executor      ExecutorConfig
 	MaxConcurrent int
-	prompt        *template.Template
-	continuation  *template.Template
+	// CloseAfter は、Issue が closed になってから作業場所を消すまでの時間。0 なら消さない（ADR 0009）
+	CloseAfter   time.Duration
+	prompt       *template.Template
+	continuation *template.Template
 }
 
 // TrackerConfig は kind で選んだ Tracker と、kind と同じ名前のブロックの設定。
@@ -37,6 +39,8 @@ type TrackerConfig struct {
 type ExecutorConfig struct {
 	Kind string       `yaml:"kind"`
 	Orca *orca.Config `yaml:"orca"`
+	// CloseAfter は書かれたままの値。解釈した値は Workflow.CloseAfter に入る
+	CloseAfter string `yaml:"close_after"`
 }
 
 // file は config.yaml の全体。知らないキーはエラーにする。
@@ -88,6 +92,15 @@ func LoadWorkflows(path string) ([]*Workflow, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	var closeAfter time.Duration
+	if exec.CloseAfter != "" {
+		if closeAfter, err = time.ParseDuration(exec.CloseAfter); err != nil {
+			return nil, fmt.Errorf("%s: executor.close_after: %w", path, err)
+		}
+		if closeAfter < 0 {
+			return nil, fmt.Errorf("%s: executor.close_after: must be 0 (off) or positive, got %v", path, closeAfter)
+		}
+	}
 	var ws []*Workflow
 	seen := map[string]bool{}
 	for i, raw := range f.Trackers {
@@ -99,6 +112,7 @@ func LoadWorkflows(path string) ([]*Workflow, error) {
 			return nil, fmt.Errorf("%s: trackers[%d]: %w", path, i, err)
 		}
 		seen[w.Name] = true
+		w.CloseAfter = closeAfter
 		ws = append(ws, w)
 	}
 	return ws, nil

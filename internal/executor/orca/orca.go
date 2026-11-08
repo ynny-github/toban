@@ -4,8 +4,10 @@ package orca
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
+	"slices"
 	"strconv"
 	"time"
 
@@ -81,21 +83,11 @@ type agentInfo struct {
 // liveAgents は path の worktree で生きている、設定した種類のエージェントのセッションと、
 // その worktree で最後に動きがあった時刻（Unix ミリ秒。max(agents[].updatedAt, lastOutputAt)）を返す。
 func (e *Executor) liveAgents(ctx context.Context, path string) (live []agentInfo, active int64, err error) {
-	var ps struct {
-		Worktrees []struct {
-			Path         string      `json:"path"`
-			LastOutputAt int64       `json:"lastOutputAt"` // Unix ミリ秒。出力のたびに更新される
-			Agents       []agentInfo `json:"agents"`
-		} `json:"worktrees"`
-		Truncated bool `json:"truncated"`
-	}
-	if err := e.call(ctx, &ps, "worktree", "ps", "--limit", "1000", "--json"); err != nil {
+	ps, err := e.ps(ctx, path)
+	if err != nil {
 		return nil, 0, err
 	}
-	if ps.Truncated {
-		return nil, 0, fmt.Errorf("orca worktree ps: result is truncated; cannot tell whether %s has a live session", path)
-	}
-	for _, w := range ps.Worktrees {
+	for _, w := range ps {
 		if w.Path != path {
 			continue
 		}
@@ -108,6 +100,27 @@ func (e *Executor) liveAgents(ctx context.Context, path string) (live []agentInf
 		}
 	}
 	return live, active, nil
+}
+
+type psWorktree struct {
+	Path         string      `json:"path"`
+	LastOutputAt int64       `json:"lastOutputAt"` // Unix ミリ秒。出力のたびに更新される
+	Agents       []agentInfo `json:"agents"`
+}
+
+// ps は orca worktree ps の worktrees を返す。about はエラーに出す、確かめたかった worktree。
+func (e *Executor) ps(ctx context.Context, about string) ([]psWorktree, error) {
+	var ps struct {
+		Worktrees []psWorktree `json:"worktrees"`
+		Truncated bool         `json:"truncated"`
+	}
+	if err := e.call(ctx, &ps, "worktree", "ps", "--limit", "1000", "--json"); err != nil {
+		return nil, err
+	}
+	if ps.Truncated {
+		return nil, fmt.Errorf("orca worktree ps: result is truncated; cannot tell whether %s has a live session", about)
+	}
+	return ps.Worktrees, nil
 }
 
 // planIdle は plan と同じだが、作業中のセッションがあれば ErrBusy を返す。Dispatch はそこへ送らない（ADR 0006）。
@@ -241,40 +254,106 @@ func (e *Executor) send(ctx context.Context, p plan, prompt string) (executor.Re
 }
 
 // findWorktree は Issue に紐付いた worktree のパスを返す。なければ空文字列。
-// linkedItems には issue の番号しか入らないので、リポジトリは worktree の projectId で照合する。
 func (e *Executor) findWorktree(ctx context.Context, issue executor.Issue) (string, error) {
-	var list struct {
-		Worktrees []struct {
-			ProjectID   string `json:"projectId"`
-			Path        string `json:"path"`
-			LinkedItems []struct {
-				Provider string `json:"provider"`
-				Type     string `json:"type"`
-				Number   int    `json:"number"`
-			} `json:"linkedItems"`
-		} `json:"worktrees"`
-		Truncated bool `json:"truncated"`
-	}
-	if err := e.call(ctx, &list, "worktree", "list", "--json"); err != nil {
+	list, err := e.worktrees(ctx, fmt.Sprintf("whether %s#%d already has a worktree", issue.Repo, issue.Number))
+	if err != nil {
 		return "", err
 	}
-	if list.Truncated {
-		return "", fmt.Errorf("orca worktree list: result is truncated; cannot tell whether %s#%d already has a worktree", issue.Repo, issue.Number)
-	}
-	for _, w := range list.Worktrees {
-		if w.ProjectID != "github:"+issue.Repo {
-			continue
-		}
-		for _, l := range w.LinkedItems {
-			if l.Provider == "github" && l.Type == "issue" && l.Number == issue.Number {
-				return w.Path, nil
-			}
+	for _, w := range list {
+		if w.linkedTo(issue) {
+			return w.Path, nil
 		}
 	}
 	return "", nil
 }
 
-// call は orca を実行し、--json の応答の result を out に読み込む。
+type worktree struct {
+	ProjectID      string `json:"projectId"`
+	Path           string `json:"path"`
+	IsMainWorktree bool   `json:"isMainWorktree"`
+	LinkedItems    []struct {
+		Provider string `json:"provider"`
+		Type     string `json:"type"`
+		Number   int    `json:"number"`
+	} `json:"linkedItems"`
+}
+
+// linkedTo は worktree が issue に紐付いているかを返す。
+// linkedItems には issue の番号しか入らないので、リポジトリは worktree の projectId で照合する。
+func (w worktree) linkedTo(issue executor.Issue) bool {
+	if w.ProjectID != "github:"+issue.Repo {
+		return false
+	}
+	for _, l := range w.LinkedItems {
+		if l.Provider == "github" && l.Type == "issue" && l.Number == issue.Number {
+			return true
+		}
+	}
+	return false
+}
+
+// worktrees は orca worktree list の worktrees を返す。what は切り詰められたときのエラーに出す、確かめたかったこと。
+func (e *Executor) worktrees(ctx context.Context, what string) ([]worktree, error) {
+	var list struct {
+		Worktrees []worktree `json:"worktrees"`
+		Truncated bool       `json:"truncated"`
+	}
+	if err := e.call(ctx, &list, "worktree", "list", "--json"); err != nil {
+		return nil, err
+	}
+	if list.Truncated {
+		return nil, fmt.Errorf("orca worktree list: result is truncated; cannot tell %s", what)
+	}
+	return list.Worktrees, nil
+}
+
+// Remove は issues に紐付く worktree をすべて orca worktree rm で消す（ADR 0009）。端末も一緒に消える。
+// メインの worktree と、done 以外（working や未知の state）の生きたセッションがある worktree は残す。--force は付けないので、
+// コミット前の変更がある worktree は消えず、そのエラーを返す（次の tick でまた試す）。
+func (e *Executor) Remove(ctx context.Context, issues []executor.Issue) (removed []string, err error) {
+	if len(issues) == 0 {
+		return nil, nil
+	}
+	list, err := e.worktrees(ctx, "which worktrees belong to closed issues")
+	if err != nil {
+		return nil, err
+	}
+	var targets []string
+	for _, w := range list {
+		if !w.IsMainWorktree && slices.ContainsFunc(issues, w.linkedTo) {
+			targets = append(targets, w.Path)
+		}
+	}
+	if len(targets) == 0 {
+		return nil, nil
+	}
+	ps, err := e.ps(ctx, "a worktree of a closed issue")
+	if err != nil {
+		return nil, err
+	}
+	working := map[string]bool{} // done になっていない生きたセッションがある worktree
+	for _, w := range ps {
+		for _, a := range w.Agents {
+			if a.HasLivePty && a.State != "done" { // 種類によらず、作業中（や未知の state）なら done まで待つ
+				working[w.Path] = true
+			}
+		}
+	}
+	var errs []error
+	for _, path := range targets {
+		if working[path] {
+			continue
+		}
+		if err := e.call(ctx, nil, "worktree", "rm", "--worktree", "path:"+path, "--json"); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", path, err))
+			continue
+		}
+		removed = append(removed, path)
+	}
+	return removed, errors.Join(errs...)
+}
+
+// call は orca を実行し、--json の応答の result を out に読み込む。out が nil なら result は読まない。
 func (e *Executor) call(ctx context.Context, out any, args ...string) error {
 	stdout, runErr := e.run(ctx, args...)
 	var env struct {
@@ -297,6 +376,9 @@ func (e *Executor) call(ctx context.Context, out any, args ...string) error {
 			return fmt.Errorf("%w: %w", executor.ErrBlocked, err)
 		}
 		return err
+	}
+	if out == nil {
+		return nil
 	}
 	return json.Unmarshal(env.Result, out)
 }
