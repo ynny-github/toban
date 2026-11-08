@@ -113,24 +113,32 @@ func (t *Tracker) Poll(ctx context.Context) (tracker.Poll, error) {
 		if c.State != "OPEN" || it.State == nil { // closed は Terminal State。Issue 以外の item は content が空
 			continue
 		}
+		if it.State.Name == t.cfg.Working {
+			poll.Working++
+		}
+		if !t.isCandidate(it) {
+			continue
+		}
 		switch it.State.Name {
 		case t.cfg.Working:
-			poll.Working++
+			poll.WorkingIssues = append(poll.WorkingIssues, toIssue(it))
 		case t.cfg.Ready:
-			if !t.isCandidate(it) {
-				continue
-			}
-			issue := tracker.Issue{
-				ID: it.ID, Repo: c.Repository.NameWithOwner, Number: c.Number,
-				Title: c.Title, Body: c.Body, URL: c.URL, State: it.State.Name,
-			}
-			for _, l := range c.Labels.Nodes {
-				issue.Labels = append(issue.Labels, l.Name)
-			}
-			poll.Candidates = append(poll.Candidates, issue)
+			poll.Candidates = append(poll.Candidates, toIssue(it))
 		}
 	}
 	return poll, nil
+}
+
+func toIssue(it item) tracker.Issue {
+	c := it.Content
+	issue := tracker.Issue{
+		ID: it.ID, Repo: c.Repository.NameWithOwner, Number: c.Number,
+		Title: c.Title, Body: c.Body, URL: c.URL, State: it.State.Name,
+	}
+	for _, l := range c.Labels.Nodes {
+		issue.Labels = append(issue.Labels, l.Name)
+	}
+	return issue
 }
 
 // fetchItems は Project の item をすべてのページから集め、State の書き換えに要る ID も覚える。

@@ -8,6 +8,10 @@
 # max_session_percent: 80   # 5 時間枠
 # max_weekly_percent: 90    # 週次枠
 
+# Working State の Issue のセッションが、返答を終えて（done）このまま止まっていたら、continuation_prompt を送る
+# continue_after: 10m       # done に入ってから送るまでの時間
+# max_continuations: 5      # 1 つの Issue に送る回数の上限。超えたらログに残すだけ
+
 # worker を起動する実行側。すべての trackers に共通
 # executor:
 #   kind: orca
@@ -33,5 +37,5 @@
 #       このリポジトリのルートの WORKFLOW.md に沿って進める。
 #
 #       {{.Issue.Body}}
-#     continuation_prompt: |     # 生きているセッションへ送る続きの指示
-#       {{.Issue.URL}} が再び Ready に戻り、State を Working に移した。Issue の最新のコメントを読んで、作業を再開する。
+#     continuation_prompt: |     # 生きているセッションへ送る続きの指示（Ready に戻されたときと、done のまま止まったとき）
+#       {{.Issue.URL}} の作業を続ける。Issue の最新のコメントを読み、WORKFLOW.md に沿って次の手順に進む。

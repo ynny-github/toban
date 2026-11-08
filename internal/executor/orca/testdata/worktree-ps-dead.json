@@ -9,6 +9,8 @@
           {
             "paneKey": "main:main",
             "state": "working",
+            "stateStartedAt": 1794099333257,
+            "updatedAt": 1794099370400,
             "agentType": "claude",
             "hasLivePty": true
           }
@@ -20,12 +22,16 @@
           {
             "paneKey": "tab-1:leaf-1",
             "state": "done",
+            "stateStartedAt": 1794099333257,
+            "updatedAt": 1794099370400,
             "agentType": "claude",
             "hasLivePty": false
           },
           {
             "paneKey": "tab-1:leaf-1",
             "state": "working",
+            "stateStartedAt": 1794099333257,
+            "updatedAt": 1794099370400,
             "agentType": "codex",
             "hasLivePty": true
           }

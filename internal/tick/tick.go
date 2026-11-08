@@ -1,4 +1,4 @@
-// Package tick は toban tick の 1 周ぶんの処理（Candidate を Dispatch する）を行う。
+// Package tick は toban tick の 1 周ぶんの処理（Working State の Issue に継続を送り、Candidate を Dispatch する）を行う。
 package tick
 
 import (
@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/ynny-github/toban/internal/executor"
+	"github.com/ynny-github/toban/internal/state"
 	"github.com/ynny-github/toban/internal/tracker"
 )
 
@@ -24,24 +26,50 @@ type Target struct {
 	Render        func(issue tracker.Issue, continuation bool) (string, error)
 }
 
+// Continuation は、Working State の Issue のセッションが done のまま止まっているとき、継続を送るための設定と記録。
+type Continuation struct {
+	After time.Duration // done に入ってからこの時間たったら送る
+	Max   int           // 1 つの Issue に送る回数の上限
+	Now   time.Time
+	Hints state.State // 送った回数。Run が書き換え、Working State を離れた Issue のエントリを消す
+	// Partial は、targets に入れられなかった Workflow があること。その Issue のエントリを消さないよう、片付けを見送る
+	Partial bool
+}
+
 // Run はすべての Target を順に処理する。1 つの Target で失敗しても残りは続け、失敗をまとめて返す。
-func Run(ctx context.Context, log *slog.Logger, targets []Target) error {
+func Run(ctx context.Context, log *slog.Logger, targets []Target, c Continuation) error {
 	var errs []error
+	keep := map[string]bool{}
+	allPolled := !c.Partial
 	for _, t := range targets {
-		if err := runOne(ctx, log.With("workflow", t.Name), t); err != nil {
+		polled, err := runOne(ctx, log.With("workflow", t.Name), t, c, keep)
+		allPolled = allPolled && polled
+		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", t.Name, err))
 		}
+	}
+	// Poll できなかった Workflow の Issue まで消さないよう、すべて見えたときだけ片付ける
+	if allPolled {
+		c.Hints.Prune(keep)
 	}
 	return errors.Join(errs...)
 }
 
-func runOne(ctx context.Context, log *slog.Logger, t Target) error {
+// runOne は polled で Poll に成功したかどうかを返す。
+func runOne(ctx context.Context, log *slog.Logger, t Target, c Continuation, keep map[string]bool) (polled bool, err error) {
 	poll, err := t.Tracker.Poll(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	free := max(0, t.MaxConcurrent-poll.Working)
 	log.Info("polled", "candidates", len(poll.Candidates), "working", poll.Working, "free", free)
+
+	// 継続は Dispatch の枠を使わず、失敗しても tick の失敗にしない（ログに残して次の周でやり直す）
+	for _, issue := range poll.WorkingIssues {
+		key := fmt.Sprintf("%s#%d", issue.Repo, issue.Number)
+		keep[key] = true
+		continueOne(ctx, log.With("issue", key), t, c, key, issue)
+	}
 
 	// 起動前に弾いた Issue は枠を使わず、次の Candidate に進む。State を移したあとの失敗は
 	// Tracker や Executor の不調の可能性が高いので、この周はそこで止める。
@@ -64,7 +92,7 @@ func runOne(ctx context.Context, log *slog.Logger, t Target) error {
 		}
 		dispatched++
 	}
-	return errors.Join(errs...)
+	return true, errors.Join(errs...)
 }
 
 // dispatch は手順書の有無を確かめ、State を Working State に移してから worker を起動する。
@@ -107,4 +135,41 @@ func dispatch(ctx context.Context, log *slog.Logger, t Target, issue tracker.Iss
 	}
 	log.Info("dispatched", "worktree", res.Worktree, "session", res.Session)
 	return false, nil
+}
+
+// continueOne は、Issue のセッションが done のまま c.After たっていて、上限に達していなければ、継続のプロンプトだけを送る。State は動かさない。
+func continueOne(ctx context.Context, log *slog.Logger, t Target, c Continuation, key string, issue tracker.Issue) {
+	hint := c.Hints[key]
+	if hint.Continuations >= c.Max {
+		log.Info("continuation limit reached; not continuing", "continuations", hint.Continuations, "last_sent_at", hint.LastSentAt)
+		return
+	}
+	eissue := executor.Issue{Repo: issue.Repo, Number: issue.Number}
+	s, err := t.Executor.Session(ctx, eissue)
+	if err != nil {
+		log.Warn("cannot tell the session's state; not continuing", "error", err)
+		return
+	}
+	// 前に送ったあと done に入り直していなければ、同じ停止に重ねて送らない
+	if s.State != "done" || c.Now.Sub(s.Since) < c.After || !s.Since.After(hint.LastSentAt) {
+		return
+	}
+	prompt, err := t.Render(issue, true)
+	if err != nil {
+		log.Warn("not continuing", "error", err)
+		return
+	}
+	res, err := t.Executor.Continue(ctx, eissue, prompt)
+	if errors.Is(err, executor.ErrBlocked) {
+		log.Info("waiting for approval; not continuing", "error", err)
+		return
+	}
+	if err != nil {
+		log.Warn("continuation not sent", "error", err)
+		return
+	}
+	hint.Continuations++
+	hint.LastSentAt = c.Now
+	c.Hints[key] = hint
+	log.Info("continued", "continuations", hint.Continuations, "worktree", res.Worktree, "session", res.Session)
 }

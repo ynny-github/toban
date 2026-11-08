@@ -60,8 +60,8 @@ func TestPollFindsCandidatesAndCountsWorking(t *testing.T) {
 	if want := []int{3, 4, 5}; !slices.Equal(numbers(got.Candidates), want) {
 		t.Errorf("candidates = %v, want %v", numbers(got.Candidates), want)
 	}
-	if got.Working != 1 {
-		t.Errorf("working = %d, want 1", got.Working)
+	if got.Working != 1 || !slices.Equal(numbers(got.WorkingIssues), []int{2}) {
+		t.Errorf("working = %d %v, want 1 [2]", got.Working, numbers(got.WorkingIssues))
 	}
 	c := got.Candidates[0]
 	if c.ID != "PVTI_lAHOAouHos4BopILzhDZQyc" || c.Repo != "ynny-github/toban" || c.State != "Todo" ||
@@ -89,6 +89,23 @@ func TestPollSkipsClosedUnassignedAndOtherRepoIssues(t *testing.T) {
 	}
 	if len(got.Candidates) != 0 {
 		t.Errorf("candidates = %v, want none", numbers(got.Candidates))
+	}
+}
+
+// 同じ Issue を Working State に置いても、継続の対象にはならないが、同時実行数には数える。
+func TestPollLeavesClosedUnassignedAndOtherRepoIssuesOutOfWorkingIssues(t *testing.T) {
+	cfg := project3
+	cfg.Repos = []string{"ynny-github/toban"}
+	cfg.Working = "Todo"
+	f := &fakeGh{t: t, responses: []string{"items-variants.json"}}
+	tr, _ := New(cfg, f.run)
+
+	got, err := tr.Poll(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.WorkingIssues) != 0 || got.Working != 5 { // #4〜#8（#3 は closed）
+		t.Errorf("working = %d %v, want 5 and none to continue", got.Working, numbers(got.WorkingIssues))
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ynny-github/toban/internal/executor"
 )
@@ -251,5 +252,69 @@ func TestDispatchRefusesWhenItCannotTellWhatToDo(t *testing.T) {
 				t.Errorf("%s: started a new agent: %q", c.name, call)
 			}
 		}
+	}
+}
+
+// ---- Working の Issue の継続 ----
+
+func TestSessionReportsWhenAFinishedSessionBecameDone(t *testing.T) {
+	for _, c := range []struct {
+		ps   string
+		want executor.Session
+	}{
+		{"worktree-ps-done.json", executor.Session{State: "done", Since: time.UnixMilli(1794099333257)}},
+		{"worktree-ps-working.json", executor.Session{State: "working"}},
+		{"worktree-ps-dead.json", executor.Session{}},
+	} {
+		f := sessionFake(t, c.ps, "terminal-send.json")
+
+		got, err := New(Config{Agent: "claude"}, f.run).Session(context.Background(), gh1)
+
+		if err != nil || !got.Since.Equal(c.want.Since) || got.State != c.want.State {
+			t.Errorf("%s: Session = %+v, %v; want %+v", c.ps, got, err, c.want)
+		}
+	}
+}
+
+func TestSessionRefusesWhenItCannotTell(t *testing.T) {
+	for _, ps := range []string{"worktree-ps-unknown.json", "worktree-ps-two.json", "worktree-ps-truncated.json"} {
+		f := sessionFake(t, ps, "terminal-send.json")
+		if _, err := New(Config{Agent: "claude"}, f.run).Session(context.Background(), gh1); err == nil {
+			t.Errorf("%s: Session succeeded", ps)
+		}
+	}
+}
+
+func TestContinueSendsThePromptToTheFinishedSession(t *testing.T) {
+	f := sessionFake(t, "worktree-ps-done.json", "terminal-send.json")
+
+	if _, err := New(Config{Agent: "claude"}, f.run).Continue(context.Background(), gh1, "keep going"); err != nil {
+		t.Fatal(err)
+	}
+	if args := f.call("terminal send"); !hasFlag(args, "--text", "keep going") || !slices.Contains(args, "--wait-submit") {
+		t.Errorf("terminal send args = %q", args)
+	}
+}
+
+func TestContinueNeverLaunches(t *testing.T) {
+	f := sessionFake(t, "worktree-ps-dead.json", "terminal-send.json")
+
+	if _, err := New(Config{Agent: "claude"}, f.run).Continue(context.Background(), gh1, "keep going"); err == nil {
+		t.Error("Continue succeeded without a live session")
+	}
+	for _, c := range f.calls {
+		if c[0] == "agent" || c[0] == "terminal" {
+			t.Errorf("unexpected call %q", c)
+		}
+	}
+}
+
+func TestContinueReportsBlockedForAPermissionMenu(t *testing.T) {
+	f := sessionFake(t, "worktree-ps-done.json", "terminal-send-blocked.json")
+
+	_, err := New(Config{Agent: "claude"}, f.run).Continue(context.Background(), gh1, "keep going")
+
+	if !errors.Is(err, executor.ErrBlocked) {
+		t.Errorf("err = %v, want ErrBlocked", err)
 	}
 }
