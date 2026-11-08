@@ -151,7 +151,7 @@ func runTick(ctx context.Context, log *slog.Logger, configDir, stateDir string) 
 	if err != nil {
 		return errors.Join(append(errs, err)...)
 	}
-	c := tick.Continuation{After: settings.ContinueAfter, Max: settings.MaxContinuations, Now: time.Now(), Hints: hints, Partial: len(errs) > 0}
+	c := tick.Continuation{After: settings.ContinueAfter, StallAfter: settings.StallAfter, Max: settings.MaxContinuations, Now: time.Now(), Hints: hints, Partial: len(errs) > 0}
 	if err := tick.Run(ctx, log, targets, c); err != nil {
 		errs = append(errs, err)
 	}

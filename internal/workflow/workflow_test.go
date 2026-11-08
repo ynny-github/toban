@@ -129,15 +129,18 @@ func TestLoadSettings(t *testing.T) {
 	if s.MaxSessionPercent != 80 || s.MaxWeeklyPercent != 90 {
 		t.Errorf("default limits = %v/%v, want 80/90", s.MaxSessionPercent, s.MaxWeeklyPercent)
 	}
-	if s.ContinueAfter != 10*time.Minute || s.MaxContinuations != 5 {
-		t.Errorf("default continuation = %v/%v, want 10m/5", s.ContinueAfter, s.MaxContinuations)
+	if s.ContinueAfter != 10*time.Minute || s.StallAfter != 30*time.Minute || s.MaxContinuations != 5 {
+		t.Errorf("default continuation = %v/%v/%v, want 10m/30m/5", s.ContinueAfter, s.StallAfter, s.MaxContinuations)
 	}
 
-	s, err = LoadSettings(writeConfig(t, "continue_after: 30m\nmax_continuations: 2\n"))
-	if err != nil || s.ContinueAfter != 30*time.Minute || s.MaxContinuations != 2 {
-		t.Errorf("continuation = %v/%v, %v; want 30m/2", s.ContinueAfter, s.MaxContinuations, err)
+	s, err = LoadSettings(writeConfig(t, "continue_after: 30m\nstall_after: 1h\nmax_continuations: 2\n"))
+	if err != nil || s.ContinueAfter != 30*time.Minute || s.StallAfter != time.Hour || s.MaxContinuations != 2 {
+		t.Errorf("continuation = %v/%v/%v, %v; want 30m/1h/2", s.ContinueAfter, s.StallAfter, s.MaxContinuations, err)
 	}
-	for _, bad := range []string{"continue_after: 0s\n", "continue_after: -1m\n", "max_continuations: 0\n"} {
+	if s, err = LoadSettings(writeConfig(t, "stall_after: 0s\n")); err != nil || s.StallAfter != 0 {
+		t.Errorf("stall_after: 0s = %v, %v; want 0 (off)", s.StallAfter, err)
+	}
+	for _, bad := range []string{"continue_after: 0s\n", "continue_after: -1m\n", "stall_after: -1m\n", "stall_after: soon\n", "max_continuations: 0\n"} {
 		if _, err := LoadSettings(writeConfig(t, bad)); err == nil {
 			t.Errorf("LoadSettings accepted %q", bad)
 		}

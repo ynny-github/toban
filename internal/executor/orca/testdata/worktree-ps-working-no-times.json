@@ -1,0 +1,33 @@
+{
+  "id": "x",
+  "ok": true,
+  "result": {
+    "worktrees": [
+      {
+        "path": "/home/dev/work/toban",
+        "agents": [
+          {
+            "paneKey": "main:main",
+            "state": "working",
+            "stateStartedAt": 1794099333257,
+            "agentType": "claude",
+            "hasLivePty": true
+          }
+        ]
+      },
+      {
+        "path": "/home/dev/orca/workspaces/toban/gh-1",
+        "agents": [
+          {
+            "paneKey": "tab-1:leaf-1",
+            "state": "working",
+            "stateStartedAt": 1794099333257,
+            "agentType": "claude",
+            "hasLivePty": true
+          }
+        ]
+      }
+    ],
+    "truncated": false
+  }
+}

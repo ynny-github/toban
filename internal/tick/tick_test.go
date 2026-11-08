@@ -215,11 +215,16 @@ func settings(hints state.State) Continuation {
 	if hints == nil {
 		hints = state.State{}
 	}
-	return Continuation{After: 10 * time.Minute, Max: 5, Now: now, Hints: hints}
+	return Continuation{After: 10 * time.Minute, StallAfter: 30 * time.Minute, Max: 5, Now: now, Hints: hints}
 }
 
 func doneFor(d time.Duration) executor.Session {
 	return executor.Session{State: "done", Since: now.Add(-d)}
+}
+
+// stalledFor は、working のまま d のあいだ動きがないセッション。
+func stalledFor(d time.Duration) executor.Session {
+	return executor.Session{State: "working", Since: now.Add(-d)}
 }
 
 func continueTarget(ex *fakeExecutor, poll tracker.Poll) (Target, *fakeTracker) {
@@ -270,7 +275,11 @@ func TestRunDoesNotContinue(t *testing.T) {
 		{"not accepted", &fakeExecutor{sessions: map[int]executor.Session{1: doneFor(long)}, sendErr: errors.New("did not accept")}, state.Entry{}},
 		{"no live session", &fakeExecutor{}, state.Entry{}},
 		{"still the same stop as the last send", &fakeExecutor{sessions: map[int]executor.Session{1: doneFor(long)}}, state.Entry{Continuations: 1, LastSentAt: now.Add(-long / 2)}},
-		{"working", &fakeExecutor{sessions: map[int]executor.Session{1: {State: "working"}}}, state.Entry{}},
+		{"working and moving", &fakeExecutor{sessions: map[int]executor.Session{1: stalledFor(29 * time.Minute)}}, state.Entry{}},
+		{"working with no activity time", &fakeExecutor{sessions: map[int]executor.Session{1: {State: "working"}}}, state.Entry{}},
+		{"stalled but limit reached", &fakeExecutor{sessions: map[int]executor.Session{1: stalledFor(time.Hour)}}, state.Entry{Continuations: 5}},
+		{"stalled but waiting for approval", &fakeExecutor{sessions: map[int]executor.Session{1: stalledFor(time.Hour)}, sendErr: fmt.Errorf("orca: %w", executor.ErrBlocked)}, state.Entry{}},
+		{"still the same stall as the last send", &fakeExecutor{sessions: map[int]executor.Session{1: stalledFor(time.Hour)}}, state.Entry{Continuations: 1, LastSentAt: now.Add(-time.Hour / 2)}},
 		{"two sessions or unknown state", &fakeExecutor{sessionErr: errors.New("2 live sessions")}, state.Entry{}},
 	} {
 		tg, _ := continueTarget(c.ex, working(1))
@@ -286,6 +295,41 @@ func TestRunDoesNotContinue(t *testing.T) {
 		if hints["o/r#1"] != c.hint {
 			t.Errorf("%s: hint = %+v, want unchanged %+v", c.name, hints["o/r#1"], c.hint)
 		}
+	}
+}
+
+func TestRunContinuesAStalledSession(t *testing.T) {
+	ex := &fakeExecutor{sessions: map[int]executor.Session{1: stalledFor(30 * time.Minute), 2: stalledFor(29 * time.Minute)}}
+	tg, tr := continueTarget(ex, working(1, 2))
+	hints := state.State{"o/r#1": {Continuations: 1}}
+
+	if err := Run(context.Background(), quiet, []Target{tg}, settings(hints)); err != nil {
+		t.Fatal(err)
+	}
+
+	if !slices.Equal(ex.sent, []string{"1 CONTINUE"}) {
+		t.Errorf("sent = %q, want only the continuation to #1", ex.sent)
+	}
+	if e := hints["o/r#1"]; e.Continuations != 2 || !e.LastSentAt.Equal(now) {
+		t.Errorf("hint = %+v, want 2 continuations sent at %v", e, now)
+	}
+	if len(tr.moved) != 0 || len(tr.restored) != 0 || len(ex.reqs) != 0 {
+		t.Errorf("moved = %v, restored = %v, dispatched = %d; want the State untouched", tr.moved, tr.restored, len(ex.reqs))
+	}
+}
+
+func TestRunDoesNotContinueStalledSessionsWhenStallAfterIsZero(t *testing.T) {
+	ex := &fakeExecutor{sessions: map[int]executor.Session{1: stalledFor(24 * time.Hour), 2: doneFor(time.Hour)}}
+	tg, _ := continueTarget(ex, working(1, 2))
+	c := settings(nil)
+	c.StallAfter = 0
+
+	if err := Run(context.Background(), quiet, []Target{tg}, c); err != nil {
+		t.Fatal(err)
+	}
+
+	if !slices.Equal(ex.sent, []string{"2 CONTINUE"}) {
+		t.Errorf("sent = %q, want only the continuation to the done #2", ex.sent)
 	}
 }
 

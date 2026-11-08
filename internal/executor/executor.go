@@ -30,7 +30,7 @@ var ErrBlocked = errors.New("the agent is waiting for approval")
 // Session は Issue の作業場所で生きているセッションの様子。
 type Session struct {
 	State string    `json:"state"` // "done"（返答を終えて止まっている）、"working"、""（生きたセッションがない）
-	Since time.Time `json:"since"` // State に入った時刻。State が "done" のときだけ入る
+	Since time.Time `json:"since"` // "done" なら done に入った時刻、"working" なら最後に動いた時刻（分からなければ空）
 }
 
 // Result は起動した worker の居場所。ログに残すためだけに使う。
@@ -45,6 +45,6 @@ type Executor interface {
 	Dispatch(ctx context.Context, req Request) (Result, error)
 	// Session は Issue のセッションの様子を返す。どれに送るか決められないときはエラーを返す。
 	Session(ctx context.Context, issue Issue) (Session, error)
-	// Continue は "done" のセッションに prompt だけを送る。新しく起動はしない。
+	// Continue は生きたセッション（"done" か "working"）に prompt だけを送る。新しく起動はしない。
 	Continue(ctx context.Context, issue Issue, prompt string) (Result, error)
 }

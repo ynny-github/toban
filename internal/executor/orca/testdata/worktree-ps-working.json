@@ -18,6 +18,7 @@
       },
       {
         "path": "/home/dev/orca/workspaces/toban/gh-1",
+        "lastOutputAt": 1794099400000,
         "agents": [
           {
             "paneKey": "tab-1:leaf-1",
