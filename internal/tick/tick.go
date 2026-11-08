@@ -26,12 +26,13 @@ type Target struct {
 	Render        func(issue tracker.Issue, continuation bool) (string, error)
 }
 
-// Continuation は、Working State の Issue のセッションが done のまま止まっているとき、継続を送るための設定と記録。
+// Continuation は、Working State の Issue のセッションが done のまま止まっているときや、working のまま動かないとき（停滞）、継続を送るための設定と記録。
 type Continuation struct {
-	After time.Duration // done に入ってからこの時間たったら送る
-	Max   int           // 1 つの Issue に送る回数の上限
-	Now   time.Time
-	Hints state.State // 送った回数。Run が書き換え、Working State を離れた Issue のエントリを消す
+	After      time.Duration // done に入ってからこの時間たったら送る
+	StallAfter time.Duration // working のまま動きがなくこの時間たったら送る。0 なら送らない
+	Max        int           // 1 つの Issue に送る回数の上限
+	Now        time.Time
+	Hints      state.State // 送った回数。Run が書き換え、Working State を離れた Issue のエントリを消す
 	// Partial は、targets に入れられなかった Workflow があること。その Issue のエントリを消さないよう、片付けを見送る
 	Partial bool
 }
@@ -137,7 +138,8 @@ func dispatch(ctx context.Context, log *slog.Logger, t Target, issue tracker.Iss
 	return false, nil
 }
 
-// continueOne は、Issue のセッションが done のまま c.After たっていて、上限に達していなければ、継続のプロンプトだけを送る。State は動かさない。
+// continueOne は、Issue のセッションが done のまま c.After たっているか、working のまま動きがなく c.StallAfter たっていて、
+// 上限に達していなければ、継続のプロンプトだけを送る。State は動かさない。
 func continueOne(ctx context.Context, log *slog.Logger, t Target, c Continuation, key string, issue tracker.Issue) {
 	hint := c.Hints[key]
 	if hint.Continuations >= c.Max {
@@ -150,8 +152,9 @@ func continueOne(ctx context.Context, log *slog.Logger, t Target, c Continuation
 		log.Warn("cannot tell the session's state; not continuing", "error", err)
 		return
 	}
-	// 前に送ったあと done に入り直していなければ、同じ停止に重ねて送らない
-	if s.State != "done" || c.Now.Sub(s.Since) < c.After || !s.Since.After(hint.LastSentAt) {
+	wait := map[string]time.Duration{"done": c.After, "working": c.StallAfter}[s.State]
+	// 前に送ったあと done に入り直すか動きがなければ、同じ停止に重ねて送らない
+	if wait <= 0 || s.Since.IsZero() || c.Now.Sub(s.Since) < wait || !s.Since.After(hint.LastSentAt) {
 		return
 	}
 	prompt, err := t.Render(issue, true)

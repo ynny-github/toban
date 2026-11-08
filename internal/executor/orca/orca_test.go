@@ -257,14 +257,16 @@ func TestDispatchRefusesWhenItCannotTellWhatToDo(t *testing.T) {
 
 // ---- Working の Issue の継続 ----
 
-func TestSessionReportsWhenAFinishedSessionBecameDone(t *testing.T) {
+func TestSessionReportsWhenTheSessionLastChanged(t *testing.T) {
 	for _, c := range []struct {
 		ps   string
 		want executor.Session
 	}{
 		{"worktree-ps-done.json", executor.Session{State: "done", Since: time.UnixMilli(1794099333257)}},
-		{"worktree-ps-working.json", executor.Session{State: "working"}},
+		// 動きがない時間は、updatedAt（1794099370400）と lastOutputAt の遅いほうから数える
+		{"worktree-ps-working.json", executor.Session{State: "working", Since: time.UnixMilli(1794099400000)}},
 		{"worktree-ps-dead.json", executor.Session{}},
+		{"worktree-ps-working-no-times.json", executor.Session{State: "working"}},
 	} {
 		f := sessionFake(t, c.ps, "terminal-send.json")
 
@@ -292,6 +294,17 @@ func TestContinueSendsThePromptToTheFinishedSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	if args := f.call("terminal send"); !hasFlag(args, "--text", "keep going") || !slices.Contains(args, "--wait-submit") {
+		t.Errorf("terminal send args = %q", args)
+	}
+}
+
+func TestContinueSendsToAWorkingSession(t *testing.T) {
+	f := sessionFake(t, "worktree-ps-working.json", "terminal-send.json")
+
+	if _, err := New(Config{Agent: "claude"}, f.run).Continue(context.Background(), gh1, "keep going"); err != nil {
+		t.Fatal(err)
+	}
+	if args := f.call("terminal send"); !hasFlag(args, "--text", "keep going") {
 		t.Errorf("terminal send args = %q", args)
 	}
 }

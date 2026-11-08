@@ -4,7 +4,6 @@ package orca
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os/exec"
 	"strconv"
@@ -37,10 +36,10 @@ func New(cfg Config, run Runner) *Executor { return &Executor{cfg: cfg, run: run
 
 // plan は Issue の作業場所と、続きの指示を送る先のセッションを決める。
 // path が空なら worktree を作り、pane が空なら新しく起動し、pane があればそのセッションへ送る（ADR 0006）。
-// since は pane のセッションが done に入った時刻（Unix ミリ秒）。
+// state は pane のセッションの state。since は、done なら done に入った時刻、working なら最後に動いた時刻（Unix ミリ秒）。
 type plan struct {
-	path, pane string
-	since      int64
+	path, pane, state string
+	since             int64
 }
 
 func (e *Executor) plan(ctx context.Context, issue executor.Issue) (plan, error) {
@@ -48,7 +47,7 @@ func (e *Executor) plan(ctx context.Context, issue executor.Issue) (plan, error)
 	if err != nil || path == "" {
 		return plan{}, err
 	}
-	live, err := e.liveAgents(ctx, path)
+	live, active, err := e.liveAgents(ctx, path)
 	if err != nil {
 		return plan{}, err
 	}
@@ -56,11 +55,14 @@ func (e *Executor) plan(ctx context.Context, issue executor.Issue) (plan, error)
 	case 0:
 		return plan{path: path}, nil
 	case 1:
-		switch live[0].State {
+		p := plan{path: path, pane: live[0].PaneKey, state: live[0].State}
+		switch p.state {
 		case "done":
-			return plan{path: path, pane: live[0].PaneKey, since: live[0].StateStartedAt}, nil
+			p.since = live[0].StateStartedAt
+			return p, nil
 		case "working":
-			return plan{}, executor.ErrBusy
+			p.since = active
+			return p, nil
 		}
 		return plan{}, fmt.Errorf("%s has a %s session in the unknown state %q; not sending", path, e.cfg.Agent, live[0].State)
 	}
@@ -71,59 +73,72 @@ type agentInfo struct {
 	PaneKey        string `json:"paneKey"` // "<tabId>:<leafId>"
 	State          string `json:"state"`
 	StateStartedAt int64  `json:"stateStartedAt"` // Unix ミリ秒
+	UpdatedAt      int64  `json:"updatedAt"`      // Unix ミリ秒。ツール呼び出しのたびに更新される
 	AgentType      string `json:"agentType"`
 	HasLivePty     bool   `json:"hasLivePty"`
 }
 
-// liveAgents は path の worktree で生きている、設定した種類のエージェントのセッションを返す。
-func (e *Executor) liveAgents(ctx context.Context, path string) ([]agentInfo, error) {
+// liveAgents は path の worktree で生きている、設定した種類のエージェントのセッションと、
+// その worktree で最後に動きがあった時刻（Unix ミリ秒。max(agents[].updatedAt, lastOutputAt)）を返す。
+func (e *Executor) liveAgents(ctx context.Context, path string) (live []agentInfo, active int64, err error) {
 	var ps struct {
 		Worktrees []struct {
-			Path   string      `json:"path"`
-			Agents []agentInfo `json:"agents"`
+			Path         string      `json:"path"`
+			LastOutputAt int64       `json:"lastOutputAt"` // Unix ミリ秒。出力のたびに更新される
+			Agents       []agentInfo `json:"agents"`
 		} `json:"worktrees"`
 		Truncated bool `json:"truncated"`
 	}
 	if err := e.call(ctx, &ps, "worktree", "ps", "--limit", "1000", "--json"); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if ps.Truncated {
-		return nil, fmt.Errorf("orca worktree ps: result is truncated; cannot tell whether %s has a live session", path)
+		return nil, 0, fmt.Errorf("orca worktree ps: result is truncated; cannot tell whether %s has a live session", path)
 	}
-	var live []agentInfo
 	for _, w := range ps.Worktrees {
 		if w.Path != path {
 			continue
 		}
+		active = max(active, w.LastOutputAt)
 		for _, a := range w.Agents {
+			active = max(active, a.UpdatedAt)
 			if a.AgentType == e.cfg.Agent && a.HasLivePty {
 				live = append(live, a)
 			}
 		}
 	}
-	return live, nil
+	return live, active, nil
+}
+
+// planIdle は plan と同じだが、作業中のセッションがあれば ErrBusy を返す。Dispatch はそこへ送らない（ADR 0006）。
+func (e *Executor) planIdle(ctx context.Context, issue executor.Issue) (plan, error) {
+	p, err := e.plan(ctx, issue)
+	if err == nil && p.state == "working" {
+		return plan{}, executor.ErrBusy
+	}
+	return p, err
 }
 
 func (e *Executor) Check(ctx context.Context, issue executor.Issue) error {
-	_, err := e.plan(ctx, issue)
+	_, err := e.planIdle(ctx, issue)
 	return err
 }
 
 func (e *Executor) Session(ctx context.Context, issue executor.Issue) (executor.Session, error) {
 	p, err := e.plan(ctx, issue)
-	if errors.Is(err, executor.ErrBusy) {
-		return executor.Session{State: "working"}, nil
-	}
 	if err != nil || p.pane == "" {
 		return executor.Session{}, err
+	}
+	if p.since <= 0 && p.state == "working" { // 動いた時刻が分からない。Since を空にして、tick に送らせない
+		return executor.Session{State: "working"}, nil
 	}
 	if p.since <= 0 { // 時刻が分からないまま、すぐ送ってしまわないように
 		return executor.Session{}, fmt.Errorf("%s: orca worktree ps did not report when the session became done", p.path)
 	}
-	return executor.Session{State: "done", Since: time.UnixMilli(p.since)}, nil
+	return executor.Session{State: p.state, Since: time.UnixMilli(p.since)}, nil
 }
 
-// Continue は送る直前にもう一度セッションを確かめ、done でなければ送らない。
+// Continue は送る直前にもう一度セッションを確かめる。done でも working でも送る（working なら次のターンまで積まれる）。
 func (e *Executor) Continue(ctx context.Context, issue executor.Issue, prompt string) (executor.Result, error) {
 	p, err := e.plan(ctx, issue)
 	if err != nil {
@@ -136,7 +151,7 @@ func (e *Executor) Continue(ctx context.Context, issue executor.Issue, prompt st
 }
 
 func (e *Executor) Dispatch(ctx context.Context, req executor.Request) (executor.Result, error) {
-	p, err := e.plan(ctx, req.Issue)
+	p, err := e.planIdle(ctx, req.Issue)
 	if err != nil {
 		return executor.Result{}, err
 	}

@@ -45,6 +45,7 @@ type file struct {
 	MaxSessionPercent *float64       `yaml:"max_session_percent"`
 	MaxWeeklyPercent  *float64       `yaml:"max_weekly_percent"`
 	ContinueAfter     string         `yaml:"continue_after"`
+	StallAfter        string         `yaml:"stall_after"`
 	MaxContinuations  *int           `yaml:"max_continuations"`
 	Executor          ExecutorConfig `yaml:"executor"`
 	Trackers          []trackerEntry `yaml:"trackers"`
@@ -196,13 +197,15 @@ type Settings struct {
 	MaxWeeklyPercent  float64
 	// Working State の Issue のセッションが done のままこの時間たったら、継続を送る
 	ContinueAfter time.Duration
+	// Working State の Issue のセッションが working のまま動きがなくこの時間たったら、継続を送る。0 なら送らない
+	StallAfter time.Duration
 	// 1 つの Issue に継続を送る回数の上限
 	MaxContinuations int
 }
 
 // LoadSettings は設定を読む。ファイルがなければ既定値を返す。
 func LoadSettings(path string) (Settings, error) {
-	s := Settings{Interval: 5 * time.Minute, MaxSessionPercent: 80, MaxWeeklyPercent: 90, ContinueAfter: 10 * time.Minute, MaxContinuations: 5}
+	s := Settings{Interval: 5 * time.Minute, MaxSessionPercent: 80, MaxWeeklyPercent: 90, ContinueAfter: 10 * time.Minute, StallAfter: 30 * time.Minute, MaxContinuations: 5}
 	raw, err := read(path)
 	if err != nil {
 		return s, err
@@ -218,6 +221,14 @@ func LoadSettings(path string) (Settings, error) {
 		}
 		if s.ContinueAfter <= 0 {
 			return s, fmt.Errorf("%s: continue_after: must be positive, got %v", path, s.ContinueAfter)
+		}
+	}
+	if raw.StallAfter != "" {
+		if s.StallAfter, err = time.ParseDuration(raw.StallAfter); err != nil {
+			return s, fmt.Errorf("%s: stall_after: %w", path, err)
+		}
+		if s.StallAfter < 0 {
+			return s, fmt.Errorf("%s: stall_after: must be 0 (off) or positive, got %v", path, s.StallAfter)
 		}
 	}
 	if raw.MaxContinuations != nil {

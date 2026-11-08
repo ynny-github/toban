@@ -29,7 +29,20 @@ Dispatch は、worker を 1 回起動するだけでなく、すでに生きて�
 - 対象は、State のほかは Candidate と同じ条件（open、ラベル、assignee、対象リポジトリ）を満たす Working State の Issue。Tracker の `Poll` が `WorkingIssues` として返す。同時実行数の `Working` は、これまでどおり条件によらず数える。
 - 生きたセッションが 1 個で `state` が `done` になってから `continue_after`（既定 10 分。`stateStartedAt` から数える）たっていれば、`continuation_prompt` だけを送る。送る経路は上の Dispatch と同じ `terminal send --wait-submit` で、`accepted` なら `state.json` の回数を 1 増やし、`last_sent_at` を記録する。
 - 回数が `max_continuations`（既定 5）に達したら、送らずにログに残す。許可メニュー（`agent_prompt_blocked`）のときは「承認待ち」とログに残し、回数は増やさない。受け付けられないときも同じ。
-- 生きたセッションがない、`working`、2 個以上、未知の `state` のときは送らない。死んだセッションの起動し直しと、`working` のまま止まったセッションは別の Issue で扱う。
+- 生きたセッションがない、`working`（下の停滞を除く）、2 個以上、未知の `state` のときは送らない。死んだセッションの起動し直しは別の Issue で扱う。
 - State は動かさず、Dispatch の枠も使わない。使用量の上限を超えていれば、Dispatch と一緒に見送る。送れなくても tick の失敗にはせず、次の周でやり直す。
 - 人の返事待ちで止まっているときは、worker が `WORKFLOW.md` の約束どおり State を Working から動かす。動かさないまま止まると、上限まで継続が届く。
 - Working State を離れた Issue のエントリは、すべての Workflow の `Poll` が成功した tick で `state.json` から消す。
+
+## working のまま動かないセッションへの継続（#14 で追記）
+
+`working` のまま長く動かない（停滞した）セッションにも、`done` と同じように `continuation_prompt` を送る。違うのは、動きがない時間の測り方だけ。
+
+- 動きがない時間は `now - max(agents[].updatedAt, lastOutputAt)`（どちらも Issue の worktree のもの）。Orca 1.4.243 では、`updatedAt` はツール呼び出しのたびに、`lastOutputAt` は出力のたびに更新される。
+- `stall_after`（既定 30 分。`0` で送らない）を超えたら送る。回数の上限 `max_continuations`、`state.json` への記録、承認待ちの扱い、State と Dispatch の枠を使わないこと、使用量の上限で見送ることは、`done` の継続と共通。前に送ったあと動きがなければ、同じ停滞に重ねて送らない。
+- 上の「`working` のセッションに割り込んで送る」を採らなかった理由は、ここには当たらない。`working` 中のセッションに `terminal send` で送った文字は割り込まずに積まれ、実行中のツールが終わったあとの次のターンで処理される（実機で確認）。受信確認は `input_accepted` までで `turn_started` は付かないので、これまでどおり `accepted` で受け付けを判定する。Dispatch は、これまでどおり `working` のセッションに送らない。
+
+### Consequences
+
+- バックグラウンドの処理を待っているだけのセッションも、`stall_after` を超えると継続が届く。積まれるだけなので害は小さいが、送った回数が上限に近づく。
+- Claude が終了してシェルだけが残ると、`worktree ps` は `working` のままになり、継続の文章がシェルに入力される。起動し直しは #15 で扱う。
