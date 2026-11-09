@@ -47,6 +47,8 @@ type file struct {
 	ContinueAfter     string         `yaml:"continue_after"`
 	StallAfter        string         `yaml:"stall_after"`
 	MaxContinuations  *int           `yaml:"max_continuations"`
+	RelaunchAfter     string         `yaml:"relaunch_after"`
+	MaxRelaunches     *int           `yaml:"max_relaunches"`
 	Executor          ExecutorConfig `yaml:"executor"`
 	Trackers          []trackerEntry `yaml:"trackers"`
 }
@@ -201,11 +203,15 @@ type Settings struct {
 	StallAfter time.Duration
 	// 1 つの Issue に継続を送る回数の上限
 	MaxContinuations int
+	// Working State の Issue のセッションが落ちてからこの時間たったら、最初のプロンプトで起動し直す。起動し直すたびに倍にする
+	RelaunchAfter time.Duration
+	// 1 つの Issue を起動し直す回数の上限
+	MaxRelaunches int
 }
 
 // LoadSettings は設定を読む。ファイルがなければ既定値を返す。
 func LoadSettings(path string) (Settings, error) {
-	s := Settings{Interval: 5 * time.Minute, MaxSessionPercent: 80, MaxWeeklyPercent: 90, ContinueAfter: 10 * time.Minute, StallAfter: 30 * time.Minute, MaxContinuations: 5}
+	s := Settings{Interval: 5 * time.Minute, MaxSessionPercent: 80, MaxWeeklyPercent: 90, ContinueAfter: 10 * time.Minute, StallAfter: 30 * time.Minute, MaxContinuations: 5, RelaunchAfter: 10 * time.Minute, MaxRelaunches: 3}
 	raw, err := read(path)
 	if err != nil {
 		return s, err
@@ -236,6 +242,20 @@ func LoadSettings(path string) (Settings, error) {
 			return s, fmt.Errorf("%s: max_continuations: must be 1 or more, got %d", path, *raw.MaxContinuations)
 		}
 		s.MaxContinuations = *raw.MaxContinuations
+	}
+	if raw.RelaunchAfter != "" {
+		if s.RelaunchAfter, err = time.ParseDuration(raw.RelaunchAfter); err != nil {
+			return s, fmt.Errorf("%s: relaunch_after: %w", path, err)
+		}
+		if s.RelaunchAfter <= 0 {
+			return s, fmt.Errorf("%s: relaunch_after: must be positive, got %v", path, s.RelaunchAfter)
+		}
+	}
+	if raw.MaxRelaunches != nil {
+		if *raw.MaxRelaunches < 0 {
+			return s, fmt.Errorf("%s: max_relaunches: must be 0 (off) or more, got %d", path, *raw.MaxRelaunches)
+		}
+		s.MaxRelaunches = *raw.MaxRelaunches
 	}
 	for key, p := range map[string]struct {
 		in  *float64

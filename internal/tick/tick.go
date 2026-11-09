@@ -1,4 +1,4 @@
-// Package tick は toban tick の 1 周ぶんの処理（Working State の Issue に継続を送り、Candidate を Dispatch する）を行う。
+// Package tick は toban tick の 1 周ぶんの処理（Working State の Issue に継続を送るか起動し直し、Candidate を Dispatch する）を行う。
 package tick
 
 import (
@@ -27,12 +27,16 @@ type Target struct {
 }
 
 // Continuation は、Working State の Issue のセッションが done のまま止まっているときや、working のまま動かないとき（停滞）、継続を送るための設定と記録。
+// セッションが落ちていれば、継続の代わりに最初のプロンプトで起動し直す。
 type Continuation struct {
 	After      time.Duration // done に入ってからこの時間たったら送る
 	StallAfter time.Duration // working のまま動きがなくこの時間たったら送る。0 なら送らない
 	Max        int           // 1 つの Issue に送る回数の上限
-	Now        time.Time
-	Hints      state.State // 送った回数。Run が書き換え、Working State を離れた Issue のエントリを消す
+	// RelaunchAfter は、落ちてから（最後に動いてから）起動し直すまでの時間。起動し直すたびに倍にする
+	RelaunchAfter time.Duration
+	MaxRelaunches int // 1 つの Issue を起動し直す回数の上限
+	Now           time.Time
+	Hints         state.State // 送った回数。Run が書き換え、Working State を離れた Issue のエントリを消す
 	// Partial は、targets に入れられなかった Workflow があること。その Issue のエントリを消さないよう、片付けを見送る
 	Partial bool
 }
@@ -103,16 +107,11 @@ func dispatch(ctx context.Context, log *slog.Logger, t Target, issue tracker.Iss
 		log.Warn("skipped; State not moved", "error", err)
 		return false, err
 	}
-	body, err := t.Render(issue, false)
+	req, err := request(t, issue)
 	if err != nil {
 		return false, err
 	}
-	continuation, err := t.Render(issue, true)
-	if err != nil {
-		return false, err
-	}
-	eissue := executor.Issue{Repo: issue.Repo, Number: issue.Number}
-	if err := t.Executor.Check(ctx, eissue); err != nil {
+	if err := t.Executor.Check(ctx, req.Issue); err != nil {
 		if errors.Is(err, executor.ErrBusy) {
 			log.Info("skipped; the session is still working; State not moved")
 		}
@@ -121,11 +120,7 @@ func dispatch(ctx context.Context, log *slog.Logger, t Target, issue tracker.Iss
 	if err := t.Tracker.MoveToWorking(ctx, issue); err != nil {
 		return true, err
 	}
-	res, err := t.Executor.Dispatch(ctx, executor.Request{
-		Issue:              eissue,
-		Prompt:             strings.TrimRight(t.Tracker.Preamble(issue), "\n") + "\n\n" + body,
-		ContinuationPrompt: continuation,
-	})
+	res, err := t.Executor.Dispatch(ctx, req)
 	if err != nil {
 		if rerr := t.Tracker.Restore(ctx, issue); rerr != nil {
 			log.Error("launch failed and the State could not be restored; move it back by hand", "error", err, "restore_error", rerr)
@@ -138,18 +133,39 @@ func dispatch(ctx context.Context, log *slog.Logger, t Target, issue tracker.Iss
 	return false, nil
 }
 
+// request は、最初のプロンプト（Preamble と本文）と続きのプロンプトを展開する。
+func request(t Target, issue tracker.Issue) (executor.Request, error) {
+	body, err := t.Render(issue, false)
+	if err != nil {
+		return executor.Request{}, err
+	}
+	continuation, err := t.Render(issue, true)
+	if err != nil {
+		return executor.Request{}, err
+	}
+	return executor.Request{
+		Issue:              executor.Issue{Repo: issue.Repo, Number: issue.Number},
+		Prompt:             strings.TrimRight(t.Tracker.Preamble(issue), "\n") + "\n\n" + body,
+		ContinuationPrompt: continuation,
+	}, nil
+}
+
 // continueOne は、Issue のセッションが done のまま c.After たっているか、working のまま動きがなく c.StallAfter たっていて、
-// 上限に達していなければ、継続のプロンプトだけを送る。State は動かさない。
+// 上限に達していなければ、継続のプロンプトだけを送る。セッションが落ちていれば relaunchOne に任せる。State は動かさない。
 func continueOne(ctx context.Context, log *slog.Logger, t Target, c Continuation, key string, issue tracker.Issue) {
 	hint := c.Hints[key]
-	if hint.Continuations >= c.Max {
-		log.Info("continuation limit reached; not continuing", "continuations", hint.Continuations, "last_sent_at", hint.LastSentAt)
-		return
-	}
 	eissue := executor.Issue{Repo: issue.Repo, Number: issue.Number}
 	s, err := t.Executor.Session(ctx, eissue)
 	if err != nil {
 		log.Warn("cannot tell the session's state; not continuing", "error", err)
+		return
+	}
+	if s.State == "dead" {
+		relaunchOne(ctx, log, t, c, key, issue, s)
+		return
+	}
+	if hint.Continuations >= c.Max {
+		log.Info("continuation limit reached; not continuing", "continuations", hint.Continuations, "last_sent_at", hint.LastSentAt)
 		return
 	}
 	wait := map[string]time.Duration{"done": c.After, "working": c.StallAfter}[s.State]
@@ -175,4 +191,36 @@ func continueOne(ctx context.Context, log *slog.Logger, t Target, c Continuation
 	hint.LastSentAt = c.Now
 	c.Hints[key] = hint
 	log.Info("continued", "continuations", hint.Continuations, "worktree", res.Worktree, "session", res.Session)
+}
+
+// relaunchOne は、落ちたセッションを最初のプロンプトで起動し直す（Symphony の「異常終了のあとの、バックオフ付きリトライ」）。
+// 最後に動いたか、前に送ってから c.RelaunchAfter × 2^(起動し直した回数) たつまで待つ。State は動かさない。
+func relaunchOne(ctx context.Context, log *slog.Logger, t Target, c Continuation, key string, issue tracker.Issue, s executor.Session) {
+	hint := c.Hints[key]
+	if hint.Relaunches >= c.MaxRelaunches {
+		log.Info("relaunch limit reached; not relaunching", "relaunches", hint.Relaunches, "last_sent_at", hint.LastSentAt)
+		return
+	}
+	// 落ちた時刻も前に送った時刻も分からなければ（どちらも空）、すぐ起動し直す。そのあとは LastSentAt から待つ
+	since := s.Since
+	if hint.LastSentAt.After(since) {
+		since = hint.LastSentAt
+	}
+	if c.Now.Sub(since) < c.RelaunchAfter<<hint.Relaunches {
+		return
+	}
+	req, err := request(t, issue)
+	if err != nil {
+		log.Warn("not relaunching", "error", err)
+		return
+	}
+	res, err := t.Executor.Dispatch(ctx, req)
+	if err != nil {
+		log.Warn("relaunch failed", "error", err)
+		return
+	}
+	hint.Relaunches++
+	hint.LastSentAt = c.Now
+	c.Hints[key] = hint
+	log.Info("relaunched", "relaunches", hint.Relaunches, "worktree", res.Worktree, "session", res.Session)
 }

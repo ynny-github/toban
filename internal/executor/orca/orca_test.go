@@ -216,18 +216,21 @@ func TestCheckReportsBusyForAWorkingSession(t *testing.T) {
 }
 
 func TestDispatchLaunchesWhenNoLiveSessionOfThisAgent(t *testing.T) {
-	// 端末が終わった claude のセッションと、別の種類（codex）の作業中のセッションだけがある
-	f := &fakeOrca{t: t, responses: map[string]string{
-		"worktree list": "worktree-list.json",
-		"worktree ps":   "worktree-ps-dead.json",
-		"agent launch":  "agent-launch.json",
-	}}
+	// dead: 端末が終わった claude のセッションと、別の種類（codex）の作業中のセッションだけがある
+	// exited: claude を /exit で終えてシェルだけが残っている（hasLivePty はあるが programStatus がない）
+	for _, ps := range []string{"worktree-ps-dead.json", "worktree-ps-exited.json"} {
+		f := &fakeOrca{t: t, responses: map[string]string{
+			"worktree list": "worktree-list.json",
+			"worktree ps":   ps,
+			"agent launch":  "agent-launch.json",
+		}}
 
-	if _, err := New(Config{Agent: "claude"}, f.run).Dispatch(context.Background(), sessionRequest()); err != nil {
-		t.Fatal(err)
-	}
-	if !hasFlag(f.call("agent launch"), "--prompt", "first prompt") {
-		t.Errorf("a new session did not get the first prompt: %q", f.calls)
+		if _, err := New(Config{Agent: "claude"}, f.run).Dispatch(context.Background(), sessionRequest()); err != nil {
+			t.Fatalf("%s: %v", ps, err)
+		}
+		if !hasFlag(f.call("agent launch"), "--prompt", "first prompt") {
+			t.Errorf("%s: a new session did not get the first prompt: %q", ps, f.calls)
+		}
 	}
 }
 
@@ -265,7 +268,10 @@ func TestSessionReportsWhenTheSessionLastChanged(t *testing.T) {
 		{"worktree-ps-done.json", executor.Session{State: "done", Since: time.UnixMilli(1794099333257)}},
 		// 動きがない時間は、updatedAt（1794099370400）と lastOutputAt の遅いほうから数える
 		{"worktree-ps-working.json", executor.Session{State: "working", Since: time.UnixMilli(1794099400000)}},
-		{"worktree-ps-dead.json", executor.Session{}},
+		// 落ちた: 端末を閉じた（agents が空）、claude だけ終わってシェルが残った（programStatus がない）
+		{"worktree-ps-dead.json", executor.Session{State: "dead", Since: time.UnixMilli(1794099370400)}},
+		{"worktree-ps-exited.json", executor.Session{State: "dead", Since: time.UnixMilli(1794099370400)}},
+		{"worktree-ps-none.json", executor.Session{State: "dead"}},
 		{"worktree-ps-working-no-times.json", executor.Session{State: "working"}},
 	} {
 		f := sessionFake(t, c.ps, "terminal-send.json")

@@ -215,7 +215,7 @@ func settings(hints state.State) Continuation {
 	if hints == nil {
 		hints = state.State{}
 	}
-	return Continuation{After: 10 * time.Minute, StallAfter: 30 * time.Minute, Max: 5, Now: now, Hints: hints}
+	return Continuation{After: 10 * time.Minute, StallAfter: 30 * time.Minute, Max: 5, RelaunchAfter: 10 * time.Minute, MaxRelaunches: 3, Now: now, Hints: hints}
 }
 
 func doneFor(d time.Duration) executor.Session {
@@ -388,5 +388,82 @@ func TestRunKeepsHintsWhenADispatchFailsOrAWorkflowIsMissing(t *testing.T) {
 	_ = Run(context.Background(), quiet, nil, c)
 	if _, ok := hints["o/r#9"]; !ok {
 		t.Errorf("hints = %+v; a Workflow that was not run must keep its Issues", hints)
+	}
+}
+
+// ---- 落ちたセッションの起動し直し ----
+
+// deadFor は、d 前に最後に動いたまま、生きたセッションがなくなった（落ちた）worktree。
+func deadFor(d time.Duration) executor.Session {
+	return executor.Session{State: "dead", Since: now.Add(-d)}
+}
+
+func TestRunRelaunchesADeadSessionWithTheFirstPrompt(t *testing.T) {
+	ex := &fakeExecutor{sessions: map[int]executor.Session{1: deadFor(10 * time.Minute), 2: deadFor(9 * time.Minute)}}
+	tg, tr := continueTarget(ex, working(1, 2))
+	hints := state.State{"o/r#1": {Continuations: 5}} // 継続の上限は、起動し直しを止めない
+
+	if err := Run(context.Background(), quiet, []Target{tg}, settings(hints)); err != nil {
+		t.Fatal(err)
+	}
+
+	want := executor.Request{Issue: executor.Issue{Repo: "o/r", Number: 1}, Prompt: "PREAMBLE https://example.com/1\n\nBODY", ContinuationPrompt: "CONTINUE"}
+	if len(ex.reqs) != 1 || ex.reqs[0] != want {
+		t.Errorf("requests = %+v, want only [%+v]", ex.reqs, want)
+	}
+	if e := hints["o/r#1"]; e.Relaunches != 1 || e.Continuations != 5 || !e.LastSentAt.Equal(now) {
+		t.Errorf("hint = %+v, want 1 relaunch at %v", e, now)
+	}
+	if len(ex.sent) != 0 || len(tr.moved) != 0 || len(tr.restored) != 0 {
+		t.Errorf("sent = %q, moved = %v, restored = %v; want no continuation and the State untouched", ex.sent, tr.moved, tr.restored)
+	}
+}
+
+func TestRunBacksOffRelaunches(t *testing.T) {
+	// 2 回目は 20 分、3 回目は 40 分待つ。前に起動し直した時刻と、最後に動いた時刻の遅いほうから数える
+	for _, c := range []struct {
+		name    string
+		session executor.Session
+		hint    state.Entry
+		want    bool
+	}{
+		{"2nd before 20m", deadFor(time.Hour), state.Entry{Relaunches: 1, LastSentAt: now.Add(-19 * time.Minute)}, false},
+		{"2nd after 20m", deadFor(time.Hour), state.Entry{Relaunches: 1, LastSentAt: now.Add(-20 * time.Minute)}, true},
+		{"2nd, but it ran until recently", deadFor(19 * time.Minute), state.Entry{Relaunches: 1, LastSentAt: now.Add(-time.Hour)}, false},
+		{"3rd before 40m", deadFor(2 * time.Hour), state.Entry{Relaunches: 2, LastSentAt: now.Add(-39 * time.Minute)}, false},
+		{"3rd after 40m", deadFor(2 * time.Hour), state.Entry{Relaunches: 2, LastSentAt: now.Add(-40 * time.Minute)}, true},
+		{"limit of 3 reached", deadFor(24 * time.Hour), state.Entry{Relaunches: 3, LastSentAt: now.Add(-24 * time.Hour)}, false},
+		{"no time known", executor.Session{State: "dead"}, state.Entry{}, true},
+	} {
+		ex := &fakeExecutor{sessions: map[int]executor.Session{1: c.session}}
+		tg, _ := continueTarget(ex, working(1))
+		hints := state.State{"o/r#1": c.hint}
+
+		if err := Run(context.Background(), quiet, []Target{tg}, settings(hints)); err != nil {
+			t.Errorf("%s: %v", c.name, err)
+		}
+
+		if got := len(ex.reqs) == 1; got != c.want {
+			t.Errorf("%s: relaunched = %v, want %v", c.name, got, c.want)
+		}
+		if !c.want && hints["o/r#1"] != c.hint {
+			t.Errorf("%s: hint = %+v, want unchanged %+v", c.name, hints["o/r#1"], c.hint)
+		}
+		if c.want && hints["o/r#1"].Relaunches != c.hint.Relaunches+1 {
+			t.Errorf("%s: hint = %+v, want one more relaunch", c.name, hints["o/r#1"])
+		}
+	}
+}
+
+func TestRunDoesNotCountAFailedRelaunch(t *testing.T) {
+	ex := &fakeExecutor{sessions: map[int]executor.Session{1: deadFor(time.Hour)}, err: errors.New("orca is down")}
+	tg, tr := continueTarget(ex, working(1))
+	hints := state.State{}
+
+	if err := Run(context.Background(), quiet, []Target{tg}, settings(hints)); err != nil {
+		t.Errorf("a failed relaunch is not a tick failure: %v", err)
+	}
+	if _, ok := hints["o/r#1"]; ok || len(tr.restored) != 0 {
+		t.Errorf("hints = %+v, restored = %v; want nothing recorded and the State untouched", hints, tr.restored)
 	}
 }
