@@ -38,7 +38,7 @@ func New(cfg Config, run Runner) *Executor { return &Executor{cfg: cfg, run: run
 
 // plan は Issue の作業場所と、続きの指示を送る先のセッションを決める。
 // path が空なら worktree を作り、pane が空なら新しく起動し、pane があればそのセッションへ送る（ADR 0006）。
-// state は pane のセッションの state。since は、done なら done に入った時刻、working なら最後に動いた時刻（Unix ミリ秒）。
+// state は pane のセッションの state。since は、done なら done に入った時刻、working と pane がないときは worktree で最後に動いた時刻（Unix ミリ秒）。
 type plan struct {
 	path, pane, state string
 	since             int64
@@ -55,7 +55,7 @@ func (e *Executor) plan(ctx context.Context, issue executor.Issue) (plan, error)
 	}
 	switch len(live) {
 	case 0:
-		return plan{path: path}, nil
+		return plan{path: path, since: active}, nil
 	case 1:
 		p := plan{path: path, pane: live[0].PaneKey, state: live[0].State}
 		switch p.state {
@@ -78,6 +78,8 @@ type agentInfo struct {
 	UpdatedAt      int64  `json:"updatedAt"`      // Unix ミリ秒。ツール呼び出しのたびに更新される
 	AgentType      string `json:"agentType"`
 	HasLivePty     bool   `json:"hasLivePty"`
+	// ProgramStatus は claude が動いている間だけある。/exit のあとシェルだけ残ると、hasLivePty のままこれが消える
+	ProgramStatus *struct{} `json:"programStatus"`
 }
 
 // liveAgents は path の worktree で生きている、設定した種類のエージェントのセッションと、
@@ -94,7 +96,7 @@ func (e *Executor) liveAgents(ctx context.Context, path string) (live []agentInf
 		active = max(active, w.LastOutputAt)
 		for _, a := range w.Agents {
 			active = max(active, a.UpdatedAt)
-			if a.AgentType == e.cfg.Agent && a.HasLivePty {
+			if a.AgentType == e.cfg.Agent && a.HasLivePty && a.ProgramStatus != nil {
 				live = append(live, a)
 			}
 		}
@@ -139,8 +141,11 @@ func (e *Executor) Check(ctx context.Context, issue executor.Issue) error {
 
 func (e *Executor) Session(ctx context.Context, issue executor.Issue) (executor.Session, error) {
 	p, err := e.plan(ctx, issue)
-	if err != nil || p.pane == "" {
+	if err != nil || p.path == "" {
 		return executor.Session{}, err
+	}
+	if p.pane == "" { // worktree はあるのに生きたセッションがない（落ちた）
+		return executor.Session{State: "dead", Since: unixMilli(p.since)}, nil
 	}
 	if p.since <= 0 && p.state == "working" { // 動いた時刻が分からない。Since を空にして、tick に送らせない
 		return executor.Session{State: "working"}, nil
@@ -334,7 +339,8 @@ func (e *Executor) Remove(ctx context.Context, issues []executor.Issue) (removed
 	working := map[string]bool{} // done になっていない生きたセッションがある worktree
 	for _, w := range ps {
 		for _, a := range w.Agents {
-			if a.HasLivePty && a.State != "done" { // 種類によらず、作業中（や未知の state）なら done まで待つ
+			// 種類によらず、作業中（や未知の state）なら done まで待つ。/exit のあとシェルだけ残ったもの（programStatus なし）は落ちている
+			if a.HasLivePty && a.ProgramStatus != nil && a.State != "done" {
 				working[w.Path] = true
 			}
 		}
@@ -381,4 +387,12 @@ func (e *Executor) call(ctx context.Context, out any, args ...string) error {
 		return nil
 	}
 	return json.Unmarshal(env.Result, out)
+}
+
+// unixMilli は 0 以下（分からない）を空の時刻にする。
+func unixMilli(ms int64) time.Time {
+	if ms <= 0 {
+		return time.Time{}
+	}
+	return time.UnixMilli(ms)
 }

@@ -13,6 +13,10 @@
 # stall_after: 30m          # working のまま動き（ツール呼び出しや出力）がなくなってから送るまでの時間。0 で送らない
 # max_continuations: 5      # 1 つの Issue に送る回数の上限。超えたらログに残すだけ
 
+# Working State の Issue の worktree に生きたセッションがない（落ちた）なら、最初のプロンプトで起動し直す。State は Working のまま
+# relaunch_after: 10m        # 最後に動いてから起動し直すまでの時間。起動し直すたびに倍にする（10m, 20m, 40m）
+# max_relaunches: 3          # 1 つの Issue を起動し直す回数の上限。0 で起動し直さない。超えたらログに残すだけ
+
 # worker を起動する実行側。すべての trackers に共通
 # executor:
 #   kind: orca

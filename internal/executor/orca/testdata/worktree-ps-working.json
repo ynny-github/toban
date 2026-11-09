@@ -9,6 +9,7 @@
           {
             "paneKey": "main:main",
             "state": "working",
+            "programStatus": {"state": "working", "observedAt": 1794099333257},
             "stateStartedAt": 1794099333257,
             "updatedAt": 1794099370400,
             "agentType": "claude",
@@ -23,6 +24,7 @@
           {
             "paneKey": "tab-1:leaf-1",
             "state": "working",
+            "programStatus": {"state": "working", "observedAt": 1794099333257},
             "stateStartedAt": 1794099333257,
             "updatedAt": 1794099370400,
             "agentType": "claude",

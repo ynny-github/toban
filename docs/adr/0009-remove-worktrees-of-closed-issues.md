@@ -9,7 +9,7 @@ ADR 0002 は、オーケストレータの役割を Issue を拾って worker �
 - 「いつから closed か」は Issue の `closedAt` で数え、`state.json` には持たない。Project の State（`Done` など）は見ない。再オープンすれば Issue が open に戻るので、対象から自然に外れる。猶予は、誤って閉じたときに作業場所が消えないようにするため。
 - 消すのは、Issue に紐付く（`linkedItems` の番号と、`projectId` のリポジトリが合う）worktree すべて。`orca worktree rm --worktree path:<path>` で消し、`--force` は付けない。Orca の記録（端末のタブなど）と git の worktree がまとめて消える。ブランチは残るので、未 push のコミットだけなら失われない。
 - 消さないもの
-  - `working` のセッションがある worktree（エージェントの種類によらない）。`done` になるまで待つ。未知の `state` の生きたセッションも、同じく残す。
+  - `working` のセッションがある worktree（エージェントの種類によらない）。`done` になるまで待つ。未知の `state` の生きたセッションも、同じく残す。`/exit` のあとシェルだけ残ったもの（`programStatus` がない）は落ちているとみなし、待たない（ADR 0006）。
   - メインの worktree（`isMainWorktree`）。
 - コミット前の変更（未追跡のファイルを含む）がある worktree は、`worktree rm` が失敗する。`warn` で理由をログに出し、次の tick でまた試す。回数の上限は付けない。tick の失敗にはしない。
 - Poll のあと、使用量の上限の確認より前に行う。Claude の使用量を使わないので、上限を超えていても片付けは進める。そのため、使用量の上限の確認は tick の前で止めるのをやめ、Poll のあとで継続と Dispatch だけを見送る形にした。

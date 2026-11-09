@@ -141,7 +141,8 @@ func runTick(ctx context.Context, log *slog.Logger, configDir, stateDir string) 
 	if err != nil {
 		return errors.Join(append(errs, err)...)
 	}
-	c := tick.Continuation{After: settings.ContinueAfter, StallAfter: settings.StallAfter, Max: settings.MaxContinuations, Now: time.Now(), Hints: hints, Partial: len(errs) > 0}
+	c := tick.Continuation{After: settings.ContinueAfter, StallAfter: settings.StallAfter, Max: settings.MaxContinuations,
+		RelaunchAfter: settings.RelaunchAfter, MaxRelaunches: settings.MaxRelaunches, Now: time.Now(), Hints: hints, Partial: len(errs) > 0}
 	// 上限を超えているか、確認できないときは、継続と Dispatch を見送る（closed の Issue の片付けはする）。
 	// 見送っても Candidate は Ready のまま残り、次の tick でやり直す
 	limits, err := orca.New(orca.Config{}, orca.Command("orca")).RateLimits(ctx)

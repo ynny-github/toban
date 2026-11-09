@@ -29,8 +29,9 @@ var ErrBlocked = errors.New("the agent is waiting for approval")
 
 // Session は Issue の作業場所で生きているセッションの様子。
 type Session struct {
-	State string    `json:"state"` // "done"（返答を終えて止まっている）、"working"、""（生きたセッションがない）
-	Since time.Time `json:"since"` // "done" なら done に入った時刻、"working" なら最後に動いた時刻（分からなければ空）
+	// "done"（返答を終えて止まっている）、"working"、"dead"（作業場所はあるが生きたセッションがない。落ちた）、""（作業場所がない）
+	State string    `json:"state"`
+	Since time.Time `json:"since"` // "done" なら done に入った時刻、"working" と "dead" なら作業場所で最後に動いた時刻（分からなければ空）
 }
 
 // Result は起動した worker の居場所。ログに残すためだけに使う。
