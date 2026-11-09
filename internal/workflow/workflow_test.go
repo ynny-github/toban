@@ -90,6 +90,8 @@ func TestLoadWorkflowsRejectsBadWorkflows(t *testing.T) {
 		{"missing prompt", strings.Replace(validWorkflow, "    prompt: p\n", "", 1), "prompt: required"},
 		{"missing continuation_prompt", strings.Replace(validWorkflow, "    continuation_prompt: c\n", "", 1), "continuation_prompt: required"},
 		{"bad template", strings.Replace(validWorkflow, "prompt: p", "prompt: '{{.Issue.Number'", 1), "prompt"},
+		{"bad close_after", strings.Replace(validWorkflow, "  kind: orca\n", "  kind: orca\n  close_after: soon\n", 1), "executor.close_after"},
+		{"negative close_after", strings.Replace(validWorkflow, "  kind: orca\n", "  kind: orca\n  close_after: -1m\n", 1), "executor.close_after"},
 		{"duplicate name", validWorkflow + strings.SplitAfter(validWorkflow, "trackers:\n")[1], "used twice"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -176,5 +178,21 @@ func TestExecutorDefaultsToOrcaWithClaude(t *testing.T) {
 	}
 	if e := ws[0].Executor; e.Kind != "orca" || e.Orca == nil || e.Orca.Agent != "claude" {
 		t.Errorf("executor = %+v, want orca with agent claude", e)
+	}
+}
+
+func TestCloseAfterIsOffUnlessSet(t *testing.T) {
+	for src, want := range map[string]time.Duration{
+		validWorkflow: 0,
+		strings.Replace(validWorkflow, "  kind: orca\n", "  kind: orca\n  close_after: 0\n", 1):   0,
+		strings.Replace(validWorkflow, "  kind: orca\n", "  kind: orca\n  close_after: 30m\n", 1): 30 * time.Minute,
+	} {
+		ws, err := LoadWorkflows(writeConfig(t, src))
+		if err != nil || len(ws) != 1 {
+			t.Fatal(ws, err)
+		}
+		if ws[0].CloseAfter != want {
+			t.Errorf("close_after = %v, want %v", ws[0].CloseAfter, want)
+		}
 	}
 }

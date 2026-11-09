@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ynny-github/toban/internal/tracker"
 )
@@ -106,6 +107,23 @@ func TestPollLeavesClosedUnassignedAndOtherRepoIssuesOutOfWorkingIssues(t *testi
 	}
 	if len(got.WorkingIssues) != 0 || got.Working != 5 { // #4〜#8（#3 は closed）
 		t.Errorf("working = %d %v, want 5 and none to continue", got.Working, numbers(got.WorkingIssues))
+	}
+}
+
+// closed の Issue は、ラベルや assignee によらず、対象リポジトリのものを closedAt つきで返す。
+func TestPollReturnsClosedIssuesWithClosedAt(t *testing.T) {
+	cfg := project3
+	cfg.Repos = []string{"ynny-github/toban"}
+	f := &fakeGh{t: t, responses: []string{"items-variants.json"}}
+	tr, _ := New(cfg, f.run)
+
+	got, err := tr.Poll(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
+	if len(got.Closed) != 1 || got.Closed[0].Number != 3 || !got.Closed[0].ClosedAt.Equal(want) {
+		t.Errorf("closed = %+v, want #3 closed at %v", got.Closed, want)
 	}
 }
 

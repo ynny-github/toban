@@ -337,3 +337,67 @@ func TestContinueReportsBlockedForAPermissionMenu(t *testing.T) {
 		t.Errorf("err = %v, want ErrBlocked", err)
 	}
 }
+
+// worktree-list.json では gh-1 が ynny-github/toban#1、other/issue-1 が example/other#1 に紐付いている。
+func TestRemoveDeletesWorktreesOfTheIssue(t *testing.T) {
+	f := &fakeOrca{t: t, responses: map[string]string{
+		"worktree list": "worktree-list.json",
+		"worktree ps":   "worktree-ps-done.json",
+		"worktree rm":   "worktree-rm.json",
+	}}
+	e := New(Config{Agent: "claude"}, f.run)
+
+	removed, err := e.Remove(context.Background(), []executor.Issue{{Repo: "ynny-github/toban", Number: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := "/home/dev/orca/workspaces/toban/gh-1"
+	if !slices.Equal(removed, []string{want}) {
+		t.Errorf("removed = %q, want [%s]", removed, want)
+	}
+	args := f.call("worktree rm")
+	if !hasFlag(args, "--worktree", "path:"+want) || slices.Contains(args, "--force") {
+		t.Errorf("worktree rm args = %q, want --worktree path:%s without --force", args, want)
+	}
+}
+
+func TestRemoveLeavesWorktreesWithAWorkingSession(t *testing.T) {
+	// dead は claude が死に、codex が working。unknown は state が未知
+	for _, ps := range []string{"worktree-ps-working.json", "worktree-ps-dead.json", "worktree-ps-unknown.json"} {
+		f := &fakeOrca{t: t, responses: map[string]string{
+			"worktree list": "worktree-list.json",
+			"worktree ps":   ps,
+		}}
+		e := New(Config{Agent: "claude"}, f.run)
+
+		removed, err := e.Remove(context.Background(), []executor.Issue{{Repo: "ynny-github/toban", Number: 1}})
+		if err != nil || len(removed) != 0 {
+			t.Errorf("%s: removed = %q, err = %v, want nothing removed", ps, removed, err)
+		}
+	}
+}
+
+func TestRemoveLeavesTheMainWorktree(t *testing.T) {
+	f := &fakeOrca{t: t, responses: map[string]string{"worktree list": "worktree-list-main-linked.json"}}
+	e := New(Config{Agent: "claude"}, f.run)
+
+	removed, err := e.Remove(context.Background(), []executor.Issue{{Repo: "ynny-github/toban", Number: 1}})
+	if err != nil || len(removed) != 0 {
+		t.Errorf("removed = %q, err = %v, want nothing removed", removed, err)
+	}
+}
+
+func TestRemoveReportsAWorktreeWithUncommittedChanges(t *testing.T) {
+	f := &fakeOrca{t: t, responses: map[string]string{
+		"worktree list": "worktree-list.json",
+		"worktree ps":   "worktree-ps-done.json",
+		"worktree rm":   "worktree-rm-dirty.json",
+	}}
+	e := New(Config{Agent: "claude"}, f.run)
+
+	removed, err := e.Remove(context.Background(), []executor.Issue{{Repo: "ynny-github/toban", Number: 1}})
+	if err == nil || !strings.Contains(err.Error(), "untracked files") || len(removed) != 0 {
+		t.Errorf("removed = %q, err = %v, want the rm error and nothing removed", removed, err)
+	}
+}

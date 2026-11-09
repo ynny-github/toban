@@ -119,16 +119,6 @@ func runTick(ctx context.Context, log *slog.Logger, configDir, stateDir string) 
 	if err != nil {
 		return err
 	}
-	// 確認できないときも見送る。見送っても Candidate は Ready のまま残り、次の tick でやり直す
-	limits, err := orca.New(orca.Config{}, orca.Command("orca")).RateLimits(ctx)
-	if err != nil {
-		return fmt.Errorf("cannot check Claude usage; not dispatching: %w", err)
-	}
-	if why := limits.Over(settings.MaxSessionPercent, settings.MaxWeeklyPercent, 15*time.Minute, time.Now()); why != "" {
-		log.Info("Claude usage is over the limit; not dispatching", "reason", why)
-		return nil
-	}
-
 	if _, err := os.Stat(filepath.Join(configDir, "workflows")); err == nil {
 		log.Warn("workflows/ is no longer read; move each Workflow into the trackers list in config.yaml")
 	}
@@ -153,6 +143,15 @@ func runTick(ctx context.Context, log *slog.Logger, configDir, stateDir string) 
 	}
 	c := tick.Continuation{After: settings.ContinueAfter, StallAfter: settings.StallAfter, Max: settings.MaxContinuations,
 		RelaunchAfter: settings.RelaunchAfter, MaxRelaunches: settings.MaxRelaunches, Now: time.Now(), Hints: hints, Partial: len(errs) > 0}
+	// 上限を超えているか、確認できないときは、継続と Dispatch を見送る（closed の Issue の片付けはする）。
+	// 見送っても Candidate は Ready のまま残り、次の tick でやり直す
+	limits, err := orca.New(orca.Config{}, orca.Command("orca")).RateLimits(ctx)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("cannot check Claude usage; not dispatching: %w", err))
+		c.Over = "cannot check Claude usage"
+	} else {
+		c.Over = limits.Over(settings.MaxSessionPercent, settings.MaxWeeklyPercent, 15*time.Minute, c.Now)
+	}
 	if err := tick.Run(ctx, log, targets, c); err != nil {
 		errs = append(errs, err)
 	}
@@ -164,7 +163,7 @@ func runTick(ctx context.Context, log *slog.Logger, configDir, stateDir string) 
 
 // target は Workflow の kind に応じて、組み込みの Tracker と Executor を組み立てる。
 func target(w *workflow.Workflow) (tick.Target, error) {
-	t := tick.Target{Name: w.Name, MaxConcurrent: w.MaxConcurrent, Render: w.Render}
+	t := tick.Target{Name: w.Name, MaxConcurrent: w.MaxConcurrent, Render: w.Render, CloseAfter: w.CloseAfter}
 	switch w.Tracker.Kind {
 	case "github":
 		tr, err := github.New(*w.Tracker.GitHub, github.Command("gh"))

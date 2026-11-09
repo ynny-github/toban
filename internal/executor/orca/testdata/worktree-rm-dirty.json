@@ -1,0 +1,8 @@
+{
+  "id": "x",
+  "ok": false,
+  "error": {
+    "code": "runtime_error",
+    "message": "fatal: '/home/dev/orca/workspaces/toban/gh-1' contains modified or untracked files, use --force to delete it"
+  }
+}

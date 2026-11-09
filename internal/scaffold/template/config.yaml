@@ -22,6 +22,7 @@
 #   kind: orca
 #   orca:
 #     agent: claude
+#   close_after: 30m   # closed になってからこの時間たった Issue の worktree を消す（端末も一緒に消える。ブランチは残る）。0 か省略で消さない
 
 # Tracker の管理単位（GitHub なら Project）ごとに 1 件書く。下の例の # を外して、OWNER を直す。
 # trackers:

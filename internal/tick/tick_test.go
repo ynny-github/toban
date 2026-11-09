@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,6 +53,22 @@ type fakeExecutor struct {
 	sessionErr error
 	sendErr    error
 	sent       []string // Continue に渡された "<番号> <prompt>"
+	removeErr  error
+	removeArgs [][]int // Remove に渡された Issue の番号（呼ばれるたびに 1 件）
+}
+
+func (f *fakeExecutor) Remove(_ context.Context, issues []executor.Issue) ([]string, error) {
+	var ns []int
+	var paths []string
+	for _, i := range issues {
+		ns = append(ns, i.Number)
+		paths = append(paths, fmt.Sprintf("/wt/%d", i.Number))
+	}
+	f.removeArgs = append(f.removeArgs, ns)
+	if f.removeErr != nil {
+		return nil, f.removeErr
+	}
+	return paths, nil
 }
 
 func (f *fakeExecutor) Session(_ context.Context, i executor.Issue) (executor.Session, error) {
@@ -388,6 +405,72 @@ func TestRunKeepsHintsWhenADispatchFailsOrAWorkflowIsMissing(t *testing.T) {
 	_ = Run(context.Background(), quiet, nil, c)
 	if _, ok := hints["o/r#9"]; !ok {
 		t.Errorf("hints = %+v; a Workflow that was not run must keep its Issues", hints)
+	}
+}
+
+func closedFor(n int, d time.Duration) tracker.Issue {
+	i := issue(n)
+	i.ClosedAt = now.Add(-d)
+	return i
+}
+
+// 再オープンした Issue は open に戻り、Tracker が Closed に入れないので、ここには来ない。
+func TestRunRemovesWorktreesOfIssuesClosedLongEnough(t *testing.T) {
+	ex := &fakeExecutor{}
+	tr := &fakeTracker{poll: tracker.Poll{Closed: []tracker.Issue{closedFor(1, 31*time.Minute), closedFor(2, 29*time.Minute), issue(3)}}}
+
+	err := Run(context.Background(), quiet, []Target{{Name: "w", Tracker: tr, Executor: ex, MaxConcurrent: 1, Render: render, CloseAfter: 30 * time.Minute}}, settings(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ex.removeArgs) != 1 || !slices.Equal(ex.removeArgs[0], []int{1}) {
+		t.Errorf("Remove got %v, want [[1]] (#2 is within close_after, #3 has no closedAt)", ex.removeArgs)
+	}
+}
+
+func TestRunDoesNotRemoveWhenCloseAfterIsZero(t *testing.T) {
+	ex := &fakeExecutor{}
+	tr := &fakeTracker{poll: tracker.Poll{Closed: []tracker.Issue{closedFor(1, 24*time.Hour)}}}
+
+	if err := Run(context.Background(), quiet, []Target{{Name: "w", Tracker: tr, Executor: ex, MaxConcurrent: 1, Render: render}}, settings(nil)); err != nil {
+		t.Fatal(err)
+	}
+	if len(ex.removeArgs) != 0 {
+		t.Errorf("Remove got %v, want no call", ex.removeArgs)
+	}
+}
+
+func TestRunLogsAFailedRemovalWithoutFailing(t *testing.T) {
+	ex := &fakeExecutor{removeErr: errors.New("/wt/1: contains modified or untracked files")}
+	tr := &fakeTracker{poll: tracker.Poll{Closed: []tracker.Issue{closedFor(1, time.Hour)}}}
+	var buf strings.Builder
+	log := slog.New(slog.NewTextHandler(&buf, nil))
+
+	if err := Run(context.Background(), log, []Target{{Name: "w", Tracker: tr, Executor: ex, MaxConcurrent: 1, Render: render, CloseAfter: 30 * time.Minute}}, settings(nil)); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "level=WARN") || !strings.Contains(buf.String(), "untracked files") {
+		t.Errorf("log = %q, want a warning with the reason", buf.String())
+	}
+}
+
+// 使用量の上限を超えていても片付けはするが、継続と Dispatch は見送り、送った回数の記録は残す。
+func TestRunRemovesButDoesNotDispatchOrContinueWhenOverTheLimit(t *testing.T) {
+	ex := &fakeExecutor{sessions: map[int]executor.Session{2: doneFor(time.Hour)}}
+	poll := tracker.Poll{Candidates: []tracker.Issue{issue(1)}, WorkingIssues: []tracker.Issue{issue(2)}, Working: 1, Closed: []tracker.Issue{closedFor(3, time.Hour)}}
+	tr := &fakeTracker{poll: poll}
+	hints := state.State{"o/r#2": {Continuations: 1}}
+	c := settings(hints)
+	c.Over = "session 85% >= 80%"
+
+	if err := Run(context.Background(), quiet, []Target{{Name: "w", Tracker: tr, Executor: ex, MaxConcurrent: 2, Render: render, CloseAfter: 30 * time.Minute}}, c); err != nil {
+		t.Fatal(err)
+	}
+	if len(ex.removeArgs) != 1 || len(tr.moved) != 0 || len(ex.sent) != 0 {
+		t.Errorf("removed %v, moved %v, sent %v; want only the removal", ex.removeArgs, tr.moved, ex.sent)
+	}
+	if hints["o/r#2"].Continuations != 1 {
+		t.Errorf("hints = %v, want o/r#2 kept", hints)
 	}
 }
 

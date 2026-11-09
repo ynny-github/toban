@@ -1,0 +1,21 @@
+{
+  "id": "x",
+  "ok": true,
+  "result": {
+    "worktrees": [
+      {
+        "projectId": "github:ynny-github/toban",
+        "path": "/home/dev/work/toban",
+        "isMainWorktree": true,
+        "linkedItems": [
+          {
+            "provider": "github",
+            "type": "issue",
+            "number": 1
+          }
+        ]
+      }
+    ],
+    "truncated": false
+  }
+}

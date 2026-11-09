@@ -11,6 +11,7 @@ import (
 )
 
 // 使用量の上限を超えていれば、Working State の Issue の継続や起動し直しも含めて、orca に何も頼まない。
+// closed の Issue の片付け（ADR 0009）は上限の手前で行うので、tick は止めずに Poll まで進む（ここでは Workflow がない）。
 func TestRunTickStopsAtTheUsageGate(t *testing.T) {
 	dir := t.TempDir()
 	calls := filepath.Join(dir, "calls")
@@ -42,8 +43,5 @@ EOF
 	}
 	if strings.TrimSpace(string(got)) != "account list --json" {
 		t.Errorf("orca calls = %q, want only the usage check", got)
-	}
-	if _, err := os.Stat(filepath.Join(stateDir, "state.json")); !os.IsNotExist(err) {
-		t.Errorf("state.json was touched: %v", err)
 	}
 }

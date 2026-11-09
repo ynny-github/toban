@@ -2,7 +2,10 @@
 // 型は JSON に変換できるものに限る（ADR 0003: 後から外部コマンドの Adapter を足せるように）。
 package tracker
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 type Issue struct {
 	ID     string   `json:"id"`   // Tracker の中での識別子（GitHub なら Project の item の ID）
@@ -13,6 +16,8 @@ type Issue struct {
 	URL    string   `json:"url"`
 	Labels []string `json:"labels"`
 	State  string   `json:"state"` // 取得したときの State
+	// ClosedAt は Issue が closed になった時刻。open なら空
+	ClosedAt time.Time `json:"closed_at,omitzero"`
 }
 
 // Poll は 1 回の問い合わせで分かった、Dispatch の判断に要るもの。
@@ -21,6 +26,8 @@ type Poll struct {
 	Working    int     `json:"working"` // Working State にある Issue の数（同時実行数として数える）
 	// WorkingIssues は Working State にある Issue のうち、State のほかは Candidate の条件を満たすもの。継続を送る対象になる。
 	WorkingIssues []Issue `json:"working_issues"`
+	// Closed は closed の Issue（Terminal State）。State やラベルによらず、対象リポジトリのものをすべて返す。worktree を消す対象になる
+	Closed []Issue `json:"closed"`
 }
 
 type Tracker interface {

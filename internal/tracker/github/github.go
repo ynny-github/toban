@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ynny-github/toban/internal/tracker"
 )
@@ -83,11 +84,12 @@ type item struct {
 	ID      string `json:"id"`
 	State   *name  `json:"state"`
 	Content struct {
-		Number     int    `json:"number"`
-		Title      string `json:"title"`
-		Body       string `json:"body"`
-		URL        string `json:"url"`
-		State      string `json:"state"`
+		Number     int       `json:"number"`
+		Title      string    `json:"title"`
+		Body       string    `json:"body"`
+		URL        string    `json:"url"`
+		State      string    `json:"state"`
+		ClosedAt   time.Time `json:"closedAt"`
 		Repository struct {
 			NameWithOwner string `json:"nameWithOwner"`
 		} `json:"repository"`
@@ -110,7 +112,10 @@ func (t *Tracker) Poll(ctx context.Context) (tracker.Poll, error) {
 	var poll tracker.Poll
 	for _, it := range items {
 		c := it.Content
-		if c.State != "OPEN" || it.State == nil { // closed は Terminal State。Issue 以外の item は content が空
+		if c.State == "CLOSED" && t.inRepos(it) { // closed は State の値によらず Terminal State
+			poll.Closed = append(poll.Closed, toIssue(it))
+		}
+		if c.State != "OPEN" || it.State == nil { // Issue 以外の item は content が空
 			continue
 		}
 		if it.State.Name == t.cfg.Working {
@@ -133,7 +138,10 @@ func toIssue(it item) tracker.Issue {
 	c := it.Content
 	issue := tracker.Issue{
 		ID: it.ID, Repo: c.Repository.NameWithOwner, Number: c.Number,
-		Title: c.Title, Body: c.Body, URL: c.URL, State: it.State.Name,
+		Title: c.Title, Body: c.Body, URL: c.URL, ClosedAt: c.ClosedAt,
+	}
+	if it.State != nil { // closed の Issue は State が空のこともある
+		issue.State = it.State.Name
 	}
 	for _, l := range c.Labels.Nodes {
 		issue.Labels = append(issue.Labels, l.Name)
@@ -196,9 +204,13 @@ func (t *Tracker) fetchItems(ctx context.Context) ([]item, error) {
 	}
 }
 
+func (t *Tracker) inRepos(it item) bool {
+	return len(t.cfg.Repos) == 0 || slices.Contains(t.cfg.Repos, it.Content.Repository.NameWithOwner)
+}
+
 func (t *Tracker) isCandidate(it item) bool {
 	c := it.Content
-	if len(t.cfg.Repos) > 0 && !slices.Contains(t.cfg.Repos, c.Repository.NameWithOwner) {
+	if !t.inRepos(it) {
 		return false
 	}
 	hasLabel := slices.Contains(c.Labels.Nodes, name{t.cfg.Label})

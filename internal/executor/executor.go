@@ -48,4 +48,7 @@ type Executor interface {
 	Session(ctx context.Context, issue Issue) (Session, error)
 	// Continue は生きたセッション（"done" か "working"）に prompt だけを送る。新しく起動はしない。
 	Continue(ctx context.Context, issue Issue, prompt string) (Result, error)
+	// Remove は closed になった issues の作業場所をすべて消す。作業中のセッションがあるものは残す。
+	// removed は消した作業場所のパス。消せなかったものは、残りを続けたうえでエラーにまとめて返す。
+	Remove(ctx context.Context, issues []Issue) (removed []string, err error)
 }
